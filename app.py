@@ -5,7 +5,7 @@ import random
 import db
 from config import CRON_SECRET, CHAT_ID
 from telegram import parse_update, send_message, send_document
-from handlers import handle_message
+from handlers import handle_message, handle_callback
 from morning import build_briefing
 
 app = Flask(__name__)
@@ -20,8 +20,11 @@ def webhook():
     if not update:
         return jsonify({"status": "no data"}), 400
 
-    chat_id, text = parse_update(update)
-    if chat_id and text:
+    chat_id, text, callback = parse_update(update)
+
+    if callback and chat_id:
+        handle_callback(chat_id, callback)
+    elif chat_id and text:
         handle_message(chat_id, text)
 
     return jsonify({"status": "ok"})

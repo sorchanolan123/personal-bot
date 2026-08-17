@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timedelta
 import db
-from telegram import send_message
+from telegram import send_message, edit_message, answer_callback, make_keyboard
 
 
 # Category tags per list — easy to extend later
@@ -50,15 +50,21 @@ def parse_due_date(text):
 
 # --- Response formatters ---
 
-def format_items(items, list_name, show_done=False):
+def format_items(items, list_name, show_done=False, with_buttons=False):
+    """Format a list of items for display.
+
+    Returns (text, keyboard) if with_buttons=True, otherwise just text.
+    """
     if not items:
-        return f"📋 *{list_name}* is empty"
+        text = f"📋 *{list_name}* is empty"
+        return (text, None) if with_buttons else text
 
     # Look up category config for this list
-    base_list = list_name.split(" (")[0]  # handle filtered labels like "watch (films)"
+    base_list = list_name.split(" (")[0]
     categories = LIST_CATEGORIES.get(base_list, {})
 
     lines = [f"📋 *{list_name}*\n"]
+    buttons = []
     num = 1
     for item in items:
         # Category tag from metadata
@@ -76,8 +82,18 @@ def format_items(items, list_name, show_done=False):
             if item["due_date"]:
                 due = f" 📅 {item['due_date']}"
             lines.append(f"  {num}. {item['text']}{tag}{due}")
+            if with_buttons:
+                buttons.append([
+                    (f"✅ {num}", f"done:{base_list}:{num}"),
+                    (f"🗑 {num}", f"del:{base_list}:{num}"),
+                ])
             num += 1
-    return "\n".join(lines)
+
+    text = "\n".join(lines)
+    if with_buttons:
+        keyboard = make_keyboard(buttons) if buttons else None
+        return text, keyboard
+    return text
 
 
 def format_all_lists(lists):
@@ -374,23 +390,28 @@ def handle_focus(chat_id):
     focus = db.get_daily_focus()
     if focus:
         lines = ["🎯 *Today's focus*\n"]
+        buttons = []
         for i, item in enumerate(focus, 1):
-            status = "✅" if item["done"] else f"{i}."
-            lines.append(f"  {status} {item['text']}")
-        lines.append("\nMark done: /done\\_focus <number>")
-        send_message(chat_id, "\n".join(lines))
+            if item["done"]:
+                lines.append(f"  ✅ ~{item['text']}~")
+            else:
+                lines.append(f"  {i}. {item['text']}")
+                buttons.append([(f"✅ Done: {item['text'][:20]}", f"focus:{i}")])
+        keyboard = make_keyboard(buttons) if buttons else None
+        send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
     else:
-        # Suggest focus items
         suggestions = db.get_focus_items(limit=5)
         if suggestions:
             lines = ["🎯 *Suggested focus for today:*\n"]
-            for i, item in enumerate(suggestions, 1):
-                due = f" 📅 {item['due_date']}" if item["due_date"] else ""
-                lines.append(f"  {i}. {item['text']}{due} — /{item['list_name']}")
-            lines.append("\nReply with what you want to focus on today, or these will be set automatically.")
-            # Auto-set these as focus
             db.set_daily_focus([item["text"] for item in suggestions])
-            send_message(chat_id, "\n".join(lines))
+            focus = db.get_daily_focus()
+            buttons = []
+            for i, item in enumerate(focus, 1):
+                due = f" 📅 {suggestions[i-1]['due_date']}" if i <= len(suggestions) and suggestions[i-1]["due_date"] else ""
+                lines.append(f"  {i}. {item['text']}{due}")
+                buttons.append([(f"✅ Done: {item['text'][:20]}", f"focus:{i}")])
+            keyboard = make_keyboard(buttons) if buttons else None
+            send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
         else:
             send_message(chat_id, "🎯 Nothing pending to focus on — enjoy your day!")
 
@@ -493,15 +514,19 @@ def handle_habits(chat_id):
     logged_today = db.get_habits_logged_today()
 
     lines = ["🔄 *Your habits*\n"]
+    buttons = []
     for habit in habits:
         name = habit["name"]
         streak = db.get_habit_streak(name)
-        done_today = "✅" if name in logged_today else "⬜"
+        done_today = name in logged_today
+        icon = "✅" if done_today else "⬜"
         streak_str = f" ({streak}🔥)" if streak > 0 else ""
-        lines.append(f"  {done_today} *{name}*{streak_str}")
+        lines.append(f"  {icon} *{name}*{streak_str}")
+        if not done_today:
+            buttons.append([(f"✅ Log {name}", f"habit:{name}")])
 
-    lines.append("\nLog: /log <habit>")
-    send_message(chat_id, "\n".join(lines))
+    keyboard = make_keyboard(buttons) if buttons else None
+    send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
 
 
 # --- Freeform capture (LLM-powered) ---
@@ -648,9 +673,10 @@ def handle_list_command(chat_id, list_name, args):
     categories = LIST_CATEGORIES.get(list_name, {})
 
     if not args:
-        # Show list
+        # Show list with buttons
         items = db.get_items(list_name, include_done=True)
-        send_message(chat_id, format_items(items, list_name, show_done=True))
+        text, keyboard = format_items(items, list_name, show_done=True, with_buttons=True)
+        send_message(chat_id, text, reply_markup=keyboard)
         return
 
     # Check for category filter: "watch films" or "watch shows"
@@ -661,7 +687,9 @@ def handle_list_command(chat_id, list_name, args):
                 items = db.get_items(list_name, include_done=True)
                 filtered = [i for i in items
                             if json.loads(i["metadata"] or "{}").get("category") == cat]
-                send_message(chat_id, format_items(filtered, f"{list_name} ({cat}s)", show_done=True))
+                text, keyboard = format_items(filtered, f"{list_name} ({cat}s)",
+                                              show_done=True, with_buttons=True)
+                send_message(chat_id, text, reply_markup=keyboard)
                 return
 
     # Check for category prefix: "watch film The Godfather"
@@ -742,6 +770,99 @@ def handle_review_response(chat_id, text):
             send_message(chat_id, "📝 Review saved. Thanks for reflecting!")
 
     return True
+
+
+# --- Callback handler (button taps) ---
+
+def handle_callback(chat_id, callback):
+    """Process an inline keyboard button tap."""
+    data = callback["data"]
+    message_id = callback["message_id"]
+    callback_id = callback["id"]
+
+    parts = data.split(":")
+    action = parts[0]
+
+    if action == "done" and len(parts) == 3:
+        list_name, num = parts[1], int(parts[2])
+        if db.list_exists(list_name) and db.mark_done(list_name, num):
+            answer_callback(callback_id, "✅ Done!")
+            # Refresh the list in place
+            items = db.get_items(list_name, include_done=True)
+            text, keyboard = format_items(items, list_name, show_done=True, with_buttons=True)
+            edit_message(chat_id, message_id, text, reply_markup=keyboard)
+        else:
+            answer_callback(callback_id, "Item not found")
+
+    elif action == "del" and len(parts) == 3:
+        list_name, num = parts[1], int(parts[2])
+        if db.list_exists(list_name):
+            removed = db.delete_item(list_name, num)
+            if removed:
+                answer_callback(callback_id, f"🗑 Removed: {removed}")
+                items = db.get_items(list_name, include_done=True)
+                text, keyboard = format_items(items, list_name, show_done=True, with_buttons=True)
+                edit_message(chat_id, message_id, text, reply_markup=keyboard)
+            else:
+                answer_callback(callback_id, "Item not found")
+        else:
+            answer_callback(callback_id, "List not found")
+
+    elif action == "focus" and len(parts) == 2:
+        num = int(parts[1])
+        if db.mark_focus_done(num):
+            answer_callback(callback_id, "✅ Nice one!")
+            # Refresh focus display
+            focus = db.get_daily_focus()
+            lines = ["🎯 *Today's focus*\n"]
+            buttons = []
+            for i, item in enumerate(focus, 1):
+                if item["done"]:
+                    lines.append(f"  ✅ ~{item['text']}~")
+                else:
+                    lines.append(f"  {i}. {item['text']}")
+                    buttons.append([(f"✅ Done: {item['text'][:20]}", f"focus:{i}")])
+            keyboard = make_keyboard(buttons) if buttons else None
+            edit_message(chat_id, message_id, "\n".join(lines), reply_markup=keyboard)
+        else:
+            answer_callback(callback_id, "Item not found")
+
+    elif action == "habit" and len(parts) == 2:
+        name = parts[1]
+        habits = {h["name"] for h in db.get_habits()}
+        if name in habits:
+            db.log_habit(name)
+            streak = db.get_habit_streak(name)
+            streak_msg = f" — {streak} day streak! 🔥" if streak > 1 else ""
+            answer_callback(callback_id, f"✅ Logged {name}{streak_msg}")
+            # Refresh habits display
+            handle_habits_refresh(chat_id, message_id)
+        else:
+            answer_callback(callback_id, "Habit not found")
+
+    else:
+        answer_callback(callback_id)
+
+
+def handle_habits_refresh(chat_id, message_id):
+    """Refresh the habits message in place after a button tap."""
+    habits = db.get_habits()
+    logged_today = db.get_habits_logged_today()
+
+    lines = ["🔄 *Your habits*\n"]
+    buttons = []
+    for habit in habits:
+        name = habit["name"]
+        streak = db.get_habit_streak(name)
+        done_today = name in logged_today
+        icon = "✅" if done_today else "⬜"
+        streak_str = f" ({streak}🔥)" if streak > 0 else ""
+        lines.append(f"  {icon} *{name}*{streak_str}")
+        if not done_today:
+            buttons.append([(f"✅ Log {name}", f"habit:{name}")])
+
+    keyboard = make_keyboard(buttons) if buttons else None
+    edit_message(chat_id, message_id, "\n".join(lines), reply_markup=keyboard)
 
 
 COMMAND_MAP = {
