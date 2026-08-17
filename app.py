@@ -174,13 +174,17 @@ def trigger_smallthing():
     if not CHAT_ID:
         return jsonify({"error": "CHAT_ID not configured"}), 500
 
-    pending = db.get_all_pending()
+    # Only nudge with todo items, not shopping/reference lists
+    if db.list_exists("todo"):
+        pending = db.get_items("todo")
+    else:
+        pending = db.get_all_pending()
     if not pending:
         return jsonify({"status": "nothing pending"})
 
     item = random.choice(pending)
     due = f" (due {item['due_date']})" if item["due_date"] else ""
-    msg = f"💡 *Got a minute?*\n\n{item['text']}{due}\n\nFrom /{item['list_name']}"
+    msg = f"💡 *Got a minute?*\n\n{item['text']}{due}"
 
     result = send_message(CHAT_ID, msg)
     return jsonify({"status": "sent", "ok": result.get("ok", False)})

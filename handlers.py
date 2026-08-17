@@ -1,7 +1,14 @@
+import json
 import re
 from datetime import datetime, timedelta
 import db
 from telegram import send_message
+
+
+# Category tags per list — easy to extend later
+LIST_CATEGORIES = {
+    "watch": {"film": "🎬", "show": "📺"},
+}
 
 
 # --- Date parsing ---
@@ -47,16 +54,28 @@ def format_items(items, list_name, show_done=False):
     if not items:
         return f"📋 *{list_name}* is empty"
 
+    # Look up category config for this list
+    base_list = list_name.split(" (")[0]  # handle filtered labels like "watch (films)"
+    categories = LIST_CATEGORIES.get(base_list, {})
+
     lines = [f"📋 *{list_name}*\n"]
     num = 1
     for item in items:
+        # Category tag from metadata
+        tag = ""
+        if categories:
+            meta = json.loads(item["metadata"] or "{}") if item["metadata"] else {}
+            cat = meta.get("category", "")
+            if cat in categories:
+                tag = f" {categories[cat]}"
+
         if item["done"]:
-            lines.append(f"  ✅ ~{item['text']}~")
+            lines.append(f"  ✅ ~{item['text']}~{tag}")
         else:
             due = ""
             if item["due_date"]:
                 due = f" 📅 {item['due_date']}"
-            lines.append(f"  {num}. {item['text']}{due}")
+            lines.append(f"  {num}. {item['text']}{tag}{due}")
             num += 1
     return "\n".join(lines)
 
@@ -659,16 +678,45 @@ def handle_list_command(chat_id, list_name, args):
         send_message(chat_id, f"No list called *{list_name}*. Create it with /newlist {list_name}")
         return
 
+    categories = LIST_CATEGORIES.get(list_name, {})
+
     if not args:
         # Show list
         items = db.get_items(list_name, include_done=True)
         send_message(chat_id, format_items(items, list_name, show_done=True))
-    else:
-        # Add item
-        text, due_date = parse_due_date(args)
-        item_id = db.add_item(list_name, text, due_date=due_date)
-        due_msg = f" (due {due_date})" if due_date else ""
-        send_message(chat_id, f"➕ Added to *{list_name}*{due_msg}")
+        return
+
+    # Check for category filter: "watch films" or "watch shows"
+    if categories:
+        filter_word = args.strip().lower()
+        for cat in categories:
+            if filter_word == cat or filter_word == cat + "s":
+                items = db.get_items(list_name, include_done=True)
+                filtered = [i for i in items
+                            if json.loads(i["metadata"] or "{}").get("category") == cat]
+                send_message(chat_id, format_items(filtered, f"{list_name} ({cat}s)", show_done=True))
+                return
+
+    # Check for category prefix: "watch film The Godfather"
+    if categories:
+        first_word = args.split(None, 1)[0].lower()
+        if first_word in categories:
+            rest = args.split(None, 1)[1] if len(args.split(None, 1)) > 1 else ""
+            if not rest:
+                send_message(chat_id, f"Usage: {list_name} {first_word} <title>")
+                return
+            text, due_date = parse_due_date(rest)
+            emoji = categories[first_word]
+            db.add_item(list_name, text, due_date=due_date, metadata={"category": first_word})
+            due_msg = f" (due {due_date})" if due_date else ""
+            send_message(chat_id, f"{emoji} Added to *{list_name}*: _{text}_{due_msg}")
+            return
+
+    # Normal add
+    text, due_date = parse_due_date(args)
+    db.add_item(list_name, text, due_date=due_date)
+    due_msg = f" (due {due_date})" if due_date else ""
+    send_message(chat_id, f"➕ Added to *{list_name}*{due_msg}")
 
 
 # --- Main dispatcher ---
