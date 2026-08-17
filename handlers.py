@@ -386,45 +386,22 @@ def handle_briefing(chat_id):
 # --- Focus ---
 
 def handle_focus(chat_id):
-    """Show today's focus items, or suggest some if none set."""
-    focus = db.get_daily_focus()
-    if focus:
-        lines = ["🎯 *Today's focus*\n"]
-        buttons = []
-        for i, item in enumerate(focus, 1):
-            if item["done"]:
-                lines.append(f"  ✅ ~{item['text']}~")
-            else:
-                lines.append(f"  {i}. {item['text']}")
-                buttons.append([(f"✅ Done: {item['text'][:20]}", f"focus:{i}")])
-        keyboard = make_keyboard(buttons) if buttons else None
-        send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
-    else:
-        suggestions = db.get_focus_items(limit=5)
-        if suggestions:
-            lines = ["🎯 *Suggested focus for today:*\n"]
-            db.set_daily_focus([item["text"] for item in suggestions])
-            focus = db.get_daily_focus()
-            buttons = []
-            for i, item in enumerate(focus, 1):
-                due = f" 📅 {suggestions[i-1]['due_date']}" if i <= len(suggestions) and suggestions[i-1]["due_date"] else ""
-                lines.append(f"  {i}. {item['text']}{due}")
-                buttons.append([(f"✅ Done: {item['text'][:20]}", f"focus:{i}")])
-            keyboard = make_keyboard(buttons) if buttons else None
-            send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
-        else:
-            send_message(chat_id, "🎯 Nothing pending to focus on — enjoy your day!")
-
-
-def handle_done_focus(chat_id, args):
-    if not args or not args.strip().isdigit():
-        send_message(chat_id, "Usage: /done\\_focus <number>")
+    """Show today's focus: items due today + items completed today."""
+    items = db.get_focus_today()
+    if not items:
+        send_message(chat_id, "🎯 Nothing due today — enjoy your day!")
         return
-    num = int(args.strip())
-    if db.mark_focus_done(num):
-        send_message(chat_id, "✅ Nice one!")
-    else:
-        send_message(chat_id, f"No focus item {num}.")
+
+    lines = ["🎯 *Today*\n"]
+    buttons = []
+    for item in items:
+        if item["done"]:
+            lines.append(f"  ✅ ~{item['text']}~")
+        else:
+            buttons.append([(f"⬜ {item['text']}", f"focusdone:{item['id']}")])
+
+    keyboard = make_keyboard(buttons) if buttons else None
+    send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
 
 
 # --- Tracking ---
@@ -794,24 +771,21 @@ def handle_callback(chat_id, callback):
         else:
             answer_callback(callback_id, "Item not found")
 
-    elif action == "focus" and len(parts) == 2:
-        num = int(parts[1])
-        if db.mark_focus_done(num):
-            answer_callback(callback_id, "✅ Nice one!")
-            # Refresh focus display
-            focus = db.get_daily_focus()
-            lines = ["🎯 *Today's focus*\n"]
-            buttons = []
-            for i, item in enumerate(focus, 1):
-                if item["done"]:
-                    lines.append(f"  ✅ ~{item['text']}~")
-                else:
-                    lines.append(f"  {i}. {item['text']}")
-                    buttons.append([(f"✅ Done: {item['text'][:20]}", f"focus:{i}")])
-            keyboard = make_keyboard(buttons) if buttons else None
-            edit_message(chat_id, message_id, "\n".join(lines), reply_markup=keyboard)
-        else:
-            answer_callback(callback_id, "Item not found")
+    elif action == "focusdone" and len(parts) == 2:
+        item_id = int(parts[1])
+        db.mark_done_by_id(item_id)
+        answer_callback(callback_id, "✅ Done!")
+        # Refresh focus display in place
+        items = db.get_focus_today()
+        lines = ["🎯 *Today*\n"]
+        buttons = []
+        for item in items:
+            if item["done"]:
+                lines.append(f"  ✅ ~{item['text']}~")
+            else:
+                buttons.append([(f"⬜ {item['text']}", f"focusdone:{item['id']}")])
+        keyboard = make_keyboard(buttons) if buttons else None
+        edit_message(chat_id, message_id, "\n".join(lines), reply_markup=keyboard)
 
     elif action == "habit" and len(parts) == 2:
         name = parts[1]
@@ -877,7 +851,6 @@ COMMAND_WITH_ARGS_MAP = {
     "newhabit": handle_newhabit,
     "deletehabit": handle_deletehabit,
     "log": handle_log,
-    "done_focus": handle_done_focus,
 }
 
 

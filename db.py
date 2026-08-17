@@ -362,36 +362,30 @@ def get_due_tomorrow():
     return items
 
 
-def get_focus_items(limit=5, list_name="todo"):
-    """Pick focus items from a specific list (default: todo).
+def get_focus_today():
+    """Get today's focus: items due today (pending) + items completed today."""
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    items = conn.execute(
+        "SELECT * FROM items WHERE "
+        "(due_date = ? AND done = 0) OR "
+        "(done = 1 AND date(completed_at) = ?) "
+        "ORDER BY done, due_date, created_at",
+        (today, today)
+    ).fetchall()
+    conn.close()
+    return items
 
-    Priority: overdue from that list, then due today, then oldest pending.
-    Falls back to all lists if the specified list doesn't exist.
-    """
-    use_all = not list_name or not list_exists(list_name)
 
-    if use_all:
-        overdue = get_overdue()
-        due_today = get_due_today()
-        pending = get_all_pending()
-    else:
-        # Filter to the target list only
-        overdue = [i for i in get_overdue() if i["list_name"] == list_name]
-        due_today = [i for i in get_due_today() if i["list_name"] == list_name]
-        pending = get_items(list_name)
-
-    seen_texts = set()
-    focus = []
-
-    for item in list(overdue) + list(due_today) + list(pending):
-        key = (item["list_name"], item["text"])
-        if key not in seen_texts:
-            seen_texts.add(key)
-            focus.append(item)
-        if len(focus) >= limit:
-            break
-
-    return focus
+def mark_done_by_id(item_id):
+    """Mark an item done by its database ID."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE items SET done = 1, completed_at = datetime('now') WHERE id = ?",
+        (item_id,)
+    )
+    conn.commit()
+    conn.close()
 
 
 # --- Tracking operations ---

@@ -13,8 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import CHAT_ID
 from db import (init_db, get_overdue, get_due_today,
-                get_completed_since, get_focus_items, set_daily_focus,
-                get_habits, get_habit_streak)
+                get_completed_since, get_habits, get_habit_streak)
 from telegram import send_message
 
 
@@ -42,23 +41,13 @@ def build_briefing():
     # Due today
     due_today = get_due_today()
     if due_today:
-        lines.append("📅 *Due today:*")
+        lines.append("🎯 *Today:*")
         for item in due_today:
-            lines.append(f"  • {item['text']}")
+            lines.append(f"  ⬜ {item['text']}")
         lines.append("")
-
-    # Today's focus — pick up to 5 items from todo list
-    focus = get_focus_items(limit=5)
-    if focus:
-        set_daily_focus([item["text"] for item in focus])
-        lines.append("🎯 *Today's focus:*")
-        for i, item in enumerate(focus, 1):
-            due = f" 📅 {item['due_date']}" if item["due_date"] else ""
-            lines.append(f"  {i}. {item['text']}{due}")
-        lines.append("")
-        lines.append("Tick off with /done\\_focus <number>")
+        lines.append("Tick off with /focus")
     else:
-        lines.append("🎉 Nothing on your todo list! Enjoy your day.\n")
+        lines.append("🎉 Nothing due today! Enjoy your day.\n")
 
     # Habits reminder
     habits = get_habits()
