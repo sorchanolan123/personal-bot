@@ -1,0 +1,6 @@
+config.py
+bot.db
+bot.db-journal
+bot.db-wal
+__pycache__/
+*.pyc
