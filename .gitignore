@@ -2,5 +2,6 @@ config.py
 bot.db
 bot.db-journal
 bot.db-wal
+backups/
 __pycache__/
 *.pyc

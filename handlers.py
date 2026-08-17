@@ -77,33 +77,46 @@ def format_all_lists(lists):
 
 def handle_start(chat_id):
     send_message(chat_id, (
-        "👋 *Hey! I'm your personal list bot.*\n\n"
-        "Create a list: /newlist todo\n"
-        "Add an item: /todo buy milk\n"
-        "Add with due date: /todo call dentist due:tuesday\n"
-        "View a list: /todo\n"
-        "Mark done: /done todo 1\n"
-        "See all lists: /lists\n"
-        "See everything: /all\n\n"
-        "Type /help for all commands."
+        "👋 *Hey! I'm your personal assistant.*\n\n"
+        "*Just tell me things naturally:*\n"
+        "  \"buy oat milk and call dentist by friday\"\n"
+        "  \"worked out for 30 mins\"\n"
+        "  \"feeling 7/10 today\"\n\n"
+        "*Or use commands:*\n"
+        "  /lists — see all lists\n"
+        "  /all — everything pending\n"
+        "  /focus — today's focus items\n"
+        "  /habits — your habit tracker\n"
+        "  /help — all commands"
     ))
 
 
 def handle_help(chat_id):
     send_message(chat_id, (
         "*Commands*\n\n"
-        "/newlist <name> \\[description] — create a list\n"
-        "/deletelist <name> — delete a list\n"
-        "/rename <old> <new> — rename a list\n"
-        "/lists — show all lists\n"
-        "/<list> — show items in a list\n"
-        "/<list> <item> \\[due:date] — add an item\n"
-        "/done <list> <number> — mark item done\n"
-        "/undo <list> <number> — undo a done item\n"
-        "/clear <list> — remove completed items\n"
-        "/all — everything pending across all lists\n"
-        "/briefing — morning briefing\n\n"
-        "*Due dates:* due:today, due:tomorrow, due:monday, due:2025-03-15"
+        "*Lists:*\n"
+        "  /newlist <name> — create a list\n"
+        "  /deletelist <name> — delete a list\n"
+        "  /rename <old> <new> — rename a list\n"
+        "  /lists — show all lists\n"
+        "  /<list> — show items\n"
+        "  /<list> <item> — add an item\n"
+        "  /done <list> <n> — mark done\n"
+        "  /undo <list> <n> — undo\n"
+        "  /clear <list> — clear completed\n\n"
+        "*Focus & overview:*\n"
+        "  /all — everything pending\n"
+        "  /focus — today's focus items\n"
+        "  /briefing — morning briefing\n\n"
+        "*Tracking:*\n"
+        "  /track mood 7 feeling good — log a metric\n"
+        "  /track workout 45 morning run — log activity\n\n"
+        "*Habits:*\n"
+        "  /newhabit <name> — create a habit\n"
+        "  /log <habit> — log it for today\n"
+        "  /habits — see all habits + streaks\n"
+        "  /deletehabit <name> — remove a habit\n\n"
+        "*Or just type naturally* — I'll figure it out."
     ))
 
 
@@ -265,6 +278,210 @@ def handle_briefing(chat_id):
     send_message(chat_id, "\n".join(lines))
 
 
+# --- Focus ---
+
+def handle_focus(chat_id):
+    """Show today's focus items, or suggest some if none set."""
+    focus = db.get_daily_focus()
+    if focus:
+        lines = ["🎯 *Today's focus*\n"]
+        for i, item in enumerate(focus, 1):
+            status = "✅" if item["done"] else f"{i}."
+            lines.append(f"  {status} {item['text']}")
+        lines.append("\nMark done: /done\\_focus <number>")
+        send_message(chat_id, "\n".join(lines))
+    else:
+        # Suggest focus items
+        suggestions = db.get_focus_items(limit=5)
+        if suggestions:
+            lines = ["🎯 *Suggested focus for today:*\n"]
+            for i, item in enumerate(suggestions, 1):
+                due = f" 📅 {item['due_date']}" if item["due_date"] else ""
+                lines.append(f"  {i}. {item['text']}{due} — /{item['list_name']}")
+            lines.append("\nReply with what you want to focus on today, or these will be set automatically.")
+            # Auto-set these as focus
+            db.set_daily_focus([item["text"] for item in suggestions])
+            send_message(chat_id, "\n".join(lines))
+        else:
+            send_message(chat_id, "🎯 Nothing pending to focus on — enjoy your day!")
+
+
+def handle_done_focus(chat_id, args):
+    if not args or not args.strip().isdigit():
+        send_message(chat_id, "Usage: /done\\_focus <number>")
+        return
+    num = int(args.strip())
+    if db.mark_focus_done(num):
+        send_message(chat_id, "✅ Nice one!")
+    else:
+        send_message(chat_id, f"No focus item {num}.")
+
+
+# --- Tracking ---
+
+def handle_track(chat_id, args):
+    """Log a tracking entry. Usage: /track mood 7 feeling great"""
+    if not args:
+        send_message(chat_id, (
+            "Usage: /track <type> [value] [notes]\n\n"
+            "Examples:\n"
+            "  /track mood 7 feeling good\n"
+            "  /track workout 45 morning run\n"
+            "  /track sleep 7.5\n"
+            "  /track energy 4 low day"
+        ))
+        return
+
+    parts = args.split(None, 2)
+    type_ = parts[0].lower()
+
+    value = None
+    notes = None
+
+    if len(parts) >= 2:
+        try:
+            value = float(parts[1])
+            notes = parts[2] if len(parts) > 2 else None
+        except ValueError:
+            # No numeric value, everything after type is notes
+            notes = " ".join(parts[1:])
+
+    db.add_tracking(type_, value, notes)
+
+    response = f"📊 Logged *{type_}*"
+    if value is not None:
+        response += f": {value}"
+    if notes:
+        response += f" — {notes}"
+    send_message(chat_id, response)
+
+
+# --- Habits ---
+
+def handle_newhabit(chat_id, args):
+    if not args:
+        send_message(chat_id, "Usage: /newhabit <name>")
+        return
+    name = args.strip().lower()
+    if db.create_habit(name):
+        send_message(chat_id, f"✅ Habit *{name}* created. Log it with /log {name}")
+    else:
+        send_message(chat_id, f"Habit *{name}* already exists.")
+
+
+def handle_deletehabit(chat_id, args):
+    if not args:
+        send_message(chat_id, "Usage: /deletehabit <name>")
+        return
+    name = args.strip().lower()
+    if db.delete_habit(name):
+        send_message(chat_id, f"🗑 Deleted habit *{name}*.")
+    else:
+        send_message(chat_id, f"No habit called *{name}*.")
+
+
+def handle_log(chat_id, args):
+    if not args:
+        send_message(chat_id, "Usage: /log <habit>")
+        return
+    name = args.strip().lower()
+    habits = {h["name"] for h in db.get_habits()}
+    if name not in habits:
+        send_message(chat_id, f"No habit called *{name}*. Create one with /newhabit {name}")
+        return
+    db.log_habit(name)
+    streak = db.get_habit_streak(name)
+    streak_msg = f" — {streak} day streak! 🔥" if streak > 1 else ""
+    send_message(chat_id, f"✅ Logged *{name}*{streak_msg}")
+
+
+def handle_habits(chat_id):
+    habits = db.get_habits()
+    if not habits:
+        send_message(chat_id, "No habits yet. Create one with /newhabit <name>")
+        return
+
+    logged_today = db.get_habits_logged_today()
+
+    lines = ["🔄 *Your habits*\n"]
+    for habit in habits:
+        name = habit["name"]
+        streak = db.get_habit_streak(name)
+        done_today = "✅" if name in logged_today else "⬜"
+        streak_str = f" ({streak}🔥)" if streak > 0 else ""
+        lines.append(f"  {done_today} *{name}*{streak_str}")
+
+    lines.append("\nLog: /log <habit>")
+    send_message(chat_id, "\n".join(lines))
+
+
+# --- Freeform capture (LLM-powered) ---
+
+def handle_freeform(chat_id, text):
+    """Parse freeform text using Haiku and act on the results."""
+    try:
+        from llm import parse_freeform
+    except ImportError:
+        send_message(chat_id, "LLM module not available. Use commands instead — /help")
+        return
+
+    # Get existing list names for context
+    lists = db.get_lists()
+    list_names = [l["name"] for l in lists]
+
+    # Ensure inbox exists as a fallback list
+    if "inbox" not in list_names:
+        db.create_list("inbox", "Catch-all for unsorted items")
+        list_names.append("inbox")
+
+    actions = parse_freeform(text, list_names)
+
+    if not actions:
+        send_message(chat_id, "Sorry, I couldn't parse that. Try again or use /help for commands.")
+        return
+
+    responses = []
+    for action in actions:
+        a_type = action.get("action")
+
+        if a_type == "list_item":
+            list_name = action.get("list", "inbox").lower()
+            item_text = action.get("text", "")
+            due = action.get("due_date")
+
+            if not db.list_exists(list_name):
+                list_name = "inbox"
+
+            db.add_item(list_name, item_text, due_date=due)
+            due_msg = f" 📅 {due}" if due else ""
+            responses.append(f"➕ *{list_name}*: {item_text}{due_msg}")
+
+        elif a_type == "tracking":
+            type_ = action.get("type", "custom")
+            value = action.get("value")
+            notes = action.get("notes", "")
+            db.add_tracking(type_, value, notes)
+            val_str = f": {value}" if value is not None else ""
+            note_str = f" — {notes}" if notes else ""
+            responses.append(f"📊 Tracked *{type_}*{val_str}{note_str}")
+
+        elif a_type == "create_list":
+            new_list = action.get("list", "").lower()
+            desc = action.get("description", "")
+            if new_list and re.match(r"^[a-z][a-z0-9_]{0,29}$", new_list):
+                ok, _ = db.create_list(new_list, desc)
+                if ok:
+                    responses.append(f"📋 Created list *{new_list}*")
+
+        elif a_type == "unknown":
+            responses.append(f"🤷 Not sure what to do with: _{action.get('text', text)}_")
+
+    if responses:
+        send_message(chat_id, "\n".join(responses))
+    else:
+        send_message(chat_id, "Processed, but nothing to report.")
+
+
 def handle_list_command(chat_id, list_name, args):
     """Handle /<listname> or /<listname> <item text>."""
     if not db.list_exists(list_name):
@@ -291,6 +508,8 @@ COMMAND_MAP = {
     "lists": handle_lists,
     "all": handle_all,
     "briefing": handle_briefing,
+    "focus": handle_focus,
+    "habits": handle_habits,
 }
 
 COMMAND_WITH_ARGS_MAP = {
@@ -300,18 +519,31 @@ COMMAND_WITH_ARGS_MAP = {
     "done": handle_done,
     "undo": handle_undo,
     "clear": handle_clear,
+    "track": handle_track,
+    "newhabit": handle_newhabit,
+    "deletehabit": handle_deletehabit,
+    "log": handle_log,
+    "done_focus": handle_done_focus,
 }
 
 
 def handle_message(chat_id, text):
-    """Route an incoming message to the right handler."""
-    if not text or not text.startswith("/"):
-        return  # Ignore non-command messages
+    """Route an incoming message to the right handler.
+
+    Works with or without a leading slash. If the message doesn't match
+    any command or list name, it's sent to the LLM for freeform parsing.
+    """
+    if not text:
+        return
 
     # Strip bot username suffix (e.g., /todo@MyBot)
     text = re.sub(r"@\S+", "", text, count=1)
 
-    parts = text[1:].split(None, 1)
+    # Strip leading slash if present
+    has_slash = text.startswith("/")
+    clean = text[1:] if has_slash else text
+
+    parts = clean.split(None, 1)
     command = parts[0].lower()
     args = parts[1] if len(parts) > 1 else ""
 
@@ -325,5 +557,10 @@ def handle_message(chat_id, text):
         COMMAND_WITH_ARGS_MAP[command](chat_id, args)
         return
 
-    # Dynamic list command
-    handle_list_command(chat_id, command, args)
+    # Dynamic list command (if the first word matches a list name)
+    if db.list_exists(command):
+        handle_list_command(chat_id, command, args)
+        return
+
+    # Nothing matched — send to LLM for freeform parsing
+    handle_freeform(chat_id, text.lstrip("/"))

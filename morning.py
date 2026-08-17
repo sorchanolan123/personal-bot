@@ -12,14 +12,16 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import CHAT_ID
-from db import init_db, get_overdue, get_due_today, get_all_pending, get_stale_items, get_completed_since
+from db import (init_db, get_overdue, get_due_today, get_stale_items,
+                get_completed_since, get_focus_items, set_daily_focus,
+                get_habits, get_habit_streak)
 from telegram import send_message
 
 
 def build_briefing():
     lines = ["☀️ *Morning Briefing*\n"]
 
-    # What you got done recently
+    # What you got done yesterday
     completed = get_completed_since(days=1)
     if completed:
         lines.append(f"✅ *Completed yesterday:* {len(completed)} item(s)")
@@ -45,23 +47,32 @@ def build_briefing():
             lines.append(f"  • {item['text']} — /{item['list_name']}")
         lines.append("")
 
-    # Summary of everything else
-    all_pending = get_all_pending()
-    if all_pending:
-        grouped = {}
-        for item in all_pending:
-            grouped.setdefault(item["list_name"], []).append(item)
-        lines.append("📋 *All lists:*")
-        for list_name, items in grouped.items():
-            lines.append(f"  /{list_name}: {len(items)} pending")
+    # Today's focus — pick 3-5 items
+    focus = get_focus_items(limit=5)
+    if focus:
+        set_daily_focus([item["text"] for item in focus])
+        lines.append("🎯 *Today's focus:*")
+        for i, item in enumerate(focus, 1):
+            due = f" 📅 {item['due_date']}" if item["due_date"] else ""
+            lines.append(f"  {i}. {item['text']}{due}")
         lines.append("")
     else:
         lines.append("🎉 Nothing pending! Enjoy your day.\n")
 
+    # Habits reminder
+    habits = get_habits()
+    if habits:
+        lines.append("🔄 *Habits to log today:*")
+        for h in habits:
+            streak = get_habit_streak(h["name"])
+            streak_str = f" ({streak}🔥)" if streak > 0 else ""
+            lines.append(f"  ⬜ {h['name']}{streak_str} — /log {h['name']}")
+        lines.append("")
+
     # Stale items nudge
     stale = get_stale_items(days=7)
     if stale:
-        lines.append(f"💤 *{len(stale)} item(s) untouched for 7+ days* — worth reviewing?")
+        lines.append(f"💤 {len(stale)} item(s) untouched for 7+ days.")
 
     return "\n".join(lines)
 
@@ -69,7 +80,6 @@ def build_briefing():
 def main():
     if not CHAT_ID:
         print("Error: TELEGRAM_CHAT_ID not set in config.py or environment.")
-        print("Send /start to your bot, then check the webhook logs for your chat ID.")
         sys.exit(1)
 
     init_db()

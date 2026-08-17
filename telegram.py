@@ -36,6 +36,20 @@ def get_webhook_info():
     return resp.json()
 
 
+def send_document(chat_id, file_path, caption=None):
+    """Send a file as a Telegram document."""
+    with open(file_path, "rb") as f:
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+        resp = requests.post(
+            f"{TELEGRAM_API}/sendDocument",
+            data=data,
+            files={"document": f},
+        )
+    return resp.json()
+
+
 def parse_update(update):
     """Extract chat_id and message text from a Telegram update."""
     message = update.get("message", {})

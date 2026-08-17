@@ -16,6 +16,10 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://YOUR-USERNAME.pythonanywher
 # Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
 CRON_SECRET = os.environ.get("CRON_SECRET", "CHANGE_ME_TO_A_RANDOM_STRING")
 
+# Anthropic API key for Haiku calls (freeform parsing, weekly summaries)
+# Get one at: https://console.anthropic.com/settings/keys
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_KEY_HERE")
+
 # Database path
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.db")
 

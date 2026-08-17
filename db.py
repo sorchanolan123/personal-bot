@@ -5,7 +5,8 @@ from config import DB_PATH
 
 RESERVED_COMMANDS = {
     "start", "help", "newlist", "deletelist", "lists", "done",
-    "undo", "clear", "all", "briefing", "rename",
+    "undo", "clear", "all", "briefing", "rename", "track",
+    "habits", "newhabit", "deletehabit", "log", "focus",
 }
 
 
@@ -35,6 +36,32 @@ def init_db():
             completed_at TEXT,
             metadata TEXT DEFAULT '{}',
             FOREIGN KEY (list_name) REFERENCES lists(name) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            value REAL,
+            notes TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS habits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            schedule TEXT DEFAULT 'daily',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS habit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            habit_name TEXT NOT NULL,
+            done INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (habit_name) REFERENCES habits(name) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS daily_focus (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            done INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
         );
     """)
     conn.commit()
@@ -244,3 +271,194 @@ def get_stale_items(days=7):
     ).fetchall()
     conn.close()
     return items
+
+
+def get_due_tomorrow():
+    conn = get_db()
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    items = conn.execute(
+        "SELECT * FROM items WHERE due_date = ? AND done = 0", (tomorrow,)
+    ).fetchall()
+    conn.close()
+    return items
+
+
+def get_focus_items(limit=5):
+    """Pick focus items: overdue first, then due today, then oldest pending."""
+    overdue = get_overdue()
+    due_today = get_due_today()
+    all_pending = get_all_pending()
+
+    seen_texts = set()
+    focus = []
+
+    for item in list(overdue) + list(due_today) + list(all_pending):
+        key = (item["list_name"], item["text"])
+        if key not in seen_texts:
+            seen_texts.add(key)
+            focus.append(item)
+        if len(focus) >= limit:
+            break
+
+    return focus
+
+
+# --- Tracking operations ---
+
+def add_tracking(type_, value=None, notes=None):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO tracking (type, value, notes) VALUES (?, ?, ?)",
+        (type_.lower(), value, notes)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_tracking_since(days=7):
+    conn = get_db()
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT * FROM tracking WHERE created_at >= ? ORDER BY created_at DESC",
+        (since,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_tracking_by_type(type_, days=30):
+    conn = get_db()
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT * FROM tracking WHERE type = ? AND created_at >= ? ORDER BY created_at",
+        (type_.lower(), since)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+# --- Habit operations ---
+
+def create_habit(name, schedule="daily"):
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO habits (name, schedule) VALUES (?, ?)",
+            (name.lower().strip(), schedule)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def delete_habit(name):
+    conn = get_db()
+    conn.execute("DELETE FROM habit_logs WHERE habit_name = ?", (name.lower(),))
+    cursor = conn.execute("DELETE FROM habits WHERE name = ?", (name.lower(),))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def get_habits():
+    conn = get_db()
+    habits = conn.execute("SELECT * FROM habits ORDER BY name").fetchall()
+    conn.close()
+    return habits
+
+
+def log_habit(name, done=True):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO habit_logs (habit_name, done) VALUES (?, ?)",
+        (name.lower(), 1 if done else 0)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_habit_streak(name):
+    """Count consecutive days the habit was logged."""
+    conn = get_db()
+    logs = conn.execute(
+        "SELECT DISTINCT date(created_at) as day FROM habit_logs "
+        "WHERE habit_name = ? AND done = 1 ORDER BY day DESC",
+        (name.lower(),)
+    ).fetchall()
+    conn.close()
+
+    if not logs:
+        return 0
+
+    streak = 0
+    expected = datetime.now().date()
+    for log in logs:
+        log_date = datetime.strptime(log["day"], "%Y-%m-%d").date()
+        if log_date == expected or log_date == expected - timedelta(days=1):
+            streak += 1
+            expected = log_date - timedelta(days=1)
+        else:
+            break
+    return streak
+
+
+def get_habits_logged_today():
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    logged = conn.execute(
+        "SELECT DISTINCT habit_name FROM habit_logs WHERE date(created_at) = ?",
+        (today,)
+    ).fetchall()
+    conn.close()
+    return {row["habit_name"] for row in logged}
+
+
+def get_habit_logs_since(days=7):
+    conn = get_db()
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT habit_name, date(created_at) as day, done FROM habit_logs "
+        "WHERE created_at >= ? ORDER BY created_at",
+        (since,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+# --- Daily focus ---
+
+def set_daily_focus(items):
+    """Clear today's focus and set new items."""
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn.execute("DELETE FROM daily_focus WHERE date(created_at) = ?", (today,))
+    for text in items:
+        conn.execute("INSERT INTO daily_focus (text) VALUES (?)", (text,))
+    conn.commit()
+    conn.close()
+
+
+def get_daily_focus():
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    items = conn.execute(
+        "SELECT * FROM daily_focus WHERE date(created_at) = ? ORDER BY id",
+        (today,)
+    ).fetchall()
+    conn.close()
+    return items
+
+
+def mark_focus_done(item_number):
+    items = get_daily_focus()
+    if item_number < 1 or item_number > len(items):
+        return False
+    conn = get_db()
+    conn.execute("UPDATE daily_focus SET done = 1 WHERE id = ?", (items[item_number - 1]["id"],))
+    conn.commit()
+    conn.close()
+    return True
