@@ -473,6 +473,37 @@ def handle_freeform(chat_id, text):
                 if ok:
                     responses.append(f"📋 Created list *{new_list}*")
 
+        elif a_type == "query":
+            query_type = action.get("type", "show_all")
+            query_list = action.get("list")
+
+            if query_type == "show_list" and query_list:
+                if db.list_exists(query_list.lower()):
+                    items = db.get_items(query_list.lower(), include_done=True)
+                    responses.append(format_items(items, query_list.lower(), show_done=True))
+                else:
+                    responses.append(f"No list called *{query_list}*.")
+            elif query_type == "show_all":
+                handle_all(chat_id)
+                return  # Already sent
+            elif query_type == "show_focus":
+                handle_focus(chat_id)
+                return
+            elif query_type == "show_habits":
+                handle_habits(chat_id)
+                return
+            elif query_type == "show_tracking":
+                tracking = db.get_tracking_since(days=7)
+                if tracking:
+                    lines = ["📊 *Recent tracking (7 days)*\n"]
+                    for t in tracking[:15]:
+                        val_str = f": {t['value']}" if t["value"] is not None else ""
+                        note_str = f" — {t['notes']}" if t["notes"] else ""
+                        lines.append(f"  • *{t['type']}*{val_str}{note_str} ({t['created_at'][:10]})")
+                    responses.append("\n".join(lines))
+                else:
+                    responses.append("No tracking data in the last 7 days.")
+
         elif a_type == "unknown":
             responses.append(f"🤷 Not sure what to do with: _{action.get('text', text)}_")
 

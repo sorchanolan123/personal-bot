@@ -38,6 +38,7 @@ def parse_freeform(text, existing_lists):
         {"action": "list_item", "list": "...", "text": "...", "due_date": "YYYY-MM-DD" or null}
         {"action": "tracking", "type": "mood|workout|sleep|custom", "value": number or null, "notes": "..."}
         {"action": "create_list", "list": "...", "description": "..."}
+        {"action": "query", "type": "show_list|show_all|show_focus|show_habits|show_tracking", "list": "..." or null}
     """
     system = f"""You are a personal assistant parser. The user sent a freeform message to their life management bot.
 Parse it into structured actions. Return ONLY valid JSON — an array of action objects.
@@ -58,12 +59,22 @@ Action types:
    {{"action": "create_list", "list": "<name>", "description": "<what it's for>"}}
    Only suggest this if the items clearly don't fit any existing list.
 
+4. "query" — the user is ASKING about their data, not adding something.
+   {{"action": "query", "type": "<query_type>", "list": "<list name or null>"}}
+   Query types:
+   - "show_list" — show items in a specific list (set "list" to the list name). Use for "what's on my todo list", "show me my groceries", etc.
+   - "show_all" — show everything pending. Use for "what do I need to do", "what's on my plate", "show me everything".
+   - "show_focus" — show today's focus items. Use for "what should I focus on", "what's my plan for today".
+   - "show_habits" — show habits and streaks. Use for "how are my habits", "what habits do I have".
+   - "show_tracking" — show recent tracking data. Use for "how's my mood been", "show my tracking".
+
 Rules:
 - One message can produce multiple actions (e.g. "buy milk and I worked out for 30 mins" → list_item + tracking)
 - Parse dates naturally: "tomorrow", "next friday", "by the 15th" → YYYY-MM-DD
 - Today's date context will be provided in the user message
 - Keep item text clean and concise
-- If the message is conversational or you can't parse it, return: [{{"action": "unknown", "text": "<original>"}}]
+- IMPORTANT: If the user is asking a question about their lists or data, use "query" — do NOT add it as a list item!
+- If the message is truly uninterpretable, return: [{{"action": "unknown", "text": "<original>"}}]
 - Return ONLY the JSON array, no markdown formatting, no explanation"""
 
     from datetime import datetime
