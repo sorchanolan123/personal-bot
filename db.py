@@ -5,8 +5,9 @@ from config import DB_PATH
 
 RESERVED_COMMANDS = {
     "start", "help", "newlist", "deletelist", "lists", "done",
-    "undo", "clear", "all", "briefing", "rename", "track",
-    "habits", "newhabit", "deletehabit", "log", "focus",
+    "undo", "clear", "all", "briefing", "rename", "move", "remove",
+    "edit", "due", "undue", "track", "habits", "newhabit",
+    "deletehabit", "log", "focus",
 }
 
 
@@ -163,6 +164,68 @@ def get_items(list_name, include_done=False):
         ).fetchall()
     conn.close()
     return items
+
+
+def move_item(from_list, item_number, to_list):
+    """Move an item from one list to another by position (1-indexed)."""
+    items = get_items(from_list)
+    if item_number < 1 or item_number > len(items):
+        return False
+    item_id = items[item_number - 1]["id"]
+    conn = get_db()
+    conn.execute("UPDATE items SET list_name = ? WHERE id = ?", (to_list.lower(), item_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def delete_item(list_name, item_number):
+    """Delete a specific item by position (1-indexed)."""
+    items = get_items(list_name)
+    if item_number < 1 or item_number > len(items):
+        return None
+    item = items[item_number - 1]
+    conn = get_db()
+    conn.execute("DELETE FROM items WHERE id = ?", (item["id"],))
+    conn.commit()
+    conn.close()
+    return item["text"]
+
+
+def edit_item(list_name, item_number, new_text):
+    """Edit the text of an item by position (1-indexed)."""
+    items = get_items(list_name)
+    if item_number < 1 or item_number > len(items):
+        return False
+    item_id = items[item_number - 1]["id"]
+    conn = get_db()
+    conn.execute("UPDATE items SET text = ? WHERE id = ?", (new_text, item_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def set_due_date(list_name, item_number, due_date):
+    """Set or clear the due date on an item by position (1-indexed). Pass None to remove."""
+    items = get_items(list_name)
+    if item_number < 1 or item_number > len(items):
+        return False
+    item_id = items[item_number - 1]["id"]
+    conn = get_db()
+    conn.execute("UPDATE items SET due_date = ? WHERE id = ?", (due_date, item_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def find_item_by_text(list_name, search_text):
+    """Find an item by partial text match. Returns (position, item) or (None, None)."""
+    items = get_items(list_name)
+    search_lower = search_text.lower()
+    for i, item in enumerate(items, 1):
+        if search_lower in item["text"].lower():
+            return i, item
+    return None, None
 
 
 def mark_done(list_name, item_number):

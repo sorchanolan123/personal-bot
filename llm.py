@@ -48,8 +48,8 @@ Available lists: {json.dumps(existing_lists)}
 Action types:
 
 1. "list_item" — something to add to a list.
-   {{"action": "list_item", "list": "<existing list name>", "text": "<item text>", "due_date": "<YYYY-MM-DD or null>"}}
-   If the item fits an existing list, use it. If no list fits well, use "inbox".
+   {{"action": "list_item", "list": "<list name>", "text": "<item text>", "due_date": "<YYYY-MM-DD or null>"}}
+   If the item fits an existing list, use it. If the user mentions a list that doesn't exist yet (e.g. "add to my shopping list"), use that name anyway (e.g. "shopping") — the system will auto-create it. Only use "inbox" if there's genuinely no clear category.
 
 2. "tracking" — a life event, metric, or status update (mood, workout, sleep, health, etc.)
    {{"action": "tracking", "type": "<mood|workout|sleep|energy|health|custom>", "value": <number or null>, "notes": "<description>"}}
@@ -59,7 +59,15 @@ Action types:
    {{"action": "create_list", "list": "<name>", "description": "<what it's for>"}}
    Only suggest this if the items clearly don't fit any existing list.
 
-4. "query" — the user is ASKING about their data, not adding something.
+4. "remove_item" — remove/delete an item from a list.
+   {{"action": "remove_item", "list": "<list name>", "text": "<search text to match>"}}
+   Use when the user says "remove X from my list", "delete X", "take X off my shopping list", etc.
+
+5. "mark_done" — mark an item as completed.
+   {{"action": "mark_done", "list": "<list name>", "text": "<search text to match>"}}
+   Use when the user says "I did X", "X is done", "finished X", "completed X", etc.
+
+6. "query" — the user is ASKING about their data, not adding something.
    {{"action": "query", "type": "<query_type>", "list": "<list name or null>"}}
    Query types:
    - "show_list" — show items in a specific list (set "list" to the list name). Use for "what's on my todo list", "show me my groceries", etc.
@@ -74,6 +82,8 @@ Rules:
 - Today's date context will be provided in the user message
 - Keep item text clean and concise
 - IMPORTANT: If the user is asking a question about their lists or data, use "query" — do NOT add it as a list item!
+- IMPORTANT: If the user says "add to my X list", use "X" as the list name in list_item actions — even if X isn't in the available lists. The system will create it automatically. Do NOT add "create X list" as a list_item.
+- List names must be single lowercase words (letters, numbers, underscores). E.g. "shopping list" → list name "shopping", "work stuff" → list name "work".
 - If the message is truly uninterpretable, return: [{{"action": "unknown", "text": "<original>"}}]
 - Return ONLY the JSON array, no markdown formatting, no explanation"""
 

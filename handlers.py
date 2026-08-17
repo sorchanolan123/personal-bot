@@ -100,9 +100,15 @@ def handle_help(chat_id):
         "  /rename <old> <new> — rename a list\n"
         "  /lists — show all lists\n"
         "  /<list> — show items\n"
-        "  /<list> <item> — add an item\n"
+        "  /<list> <item> — add an item\n\n"
+        "*Items:*\n"
         "  /done <list> <n> — mark done\n"
         "  /undo <list> <n> — undo\n"
+        "  /remove <list> <n> — delete an item\n"
+        "  /edit <list> <n> <new text> — edit an item\n"
+        "  /due <list> <n> <date> — set due date\n"
+        "  /undue <list> <n> — remove due date\n"
+        "  /move <from> <n> <to> — move to another list\n"
         "  /clear <list> — clear completed\n\n"
         "*Focus & overview:*\n"
         "  /all — everything pending\n"
@@ -204,6 +210,103 @@ def handle_undo(chat_id, args):
         send_message(chat_id, "↩️ Restored!")
     else:
         send_message(chat_id, f"No completed item {num} in *{list_name}*.")
+
+
+def handle_move(chat_id, args):
+    """Move an item between lists. Usage: /move todo 2 shopping"""
+    parts = args.split() if args else []
+    if len(parts) != 3 or not parts[1].isdigit():
+        send_message(chat_id, "Usage: /move <from\\_list> <number> <to\\_list>")
+        return
+    from_list, num, to_list = parts[0], int(parts[1]), parts[2]
+    if not db.list_exists(from_list):
+        send_message(chat_id, f"No list called *{from_list}*.")
+        return
+    if not db.list_exists(to_list):
+        # Auto-create destination list
+        if re.match(r"^[a-z][a-z0-9_]{0,29}$", to_list):
+            db.create_list(to_list)
+        else:
+            send_message(chat_id, f"Invalid list name: *{to_list}*.")
+            return
+    if db.move_item(from_list, num, to_list):
+        send_message(chat_id, f"📦 Moved to *{to_list}*")
+    else:
+        send_message(chat_id, f"Item {num} not found in *{from_list}*.")
+
+
+def handle_remove(chat_id, args):
+    """Delete a specific item. Usage: /remove todo 2"""
+    parts = args.split() if args else []
+    if len(parts) != 2 or not parts[1].isdigit():
+        send_message(chat_id, "Usage: /remove <list> <number>")
+        return
+    list_name, num = parts[0], int(parts[1])
+    if not db.list_exists(list_name):
+        send_message(chat_id, f"No list called *{list_name}*.")
+        return
+    removed_text = db.delete_item(list_name, num)
+    if removed_text:
+        send_message(chat_id, f"🗑 Removed: _{removed_text}_")
+    else:
+        send_message(chat_id, f"Item {num} not found in *{list_name}*.")
+
+
+def handle_edit(chat_id, args):
+    """Edit an item's text. Usage: /edit todo 2 new text here"""
+    parts = args.split(None, 2) if args else []
+    if len(parts) < 3 or not parts[1].isdigit():
+        send_message(chat_id, "Usage: /edit <list> <number> <new text>")
+        return
+    list_name, num, new_text = parts[0], int(parts[1]), parts[2]
+    if not db.list_exists(list_name):
+        send_message(chat_id, f"No list called *{list_name}*.")
+        return
+    if db.edit_item(list_name, num, new_text):
+        send_message(chat_id, f"✏️ Updated: _{new_text}_")
+    else:
+        send_message(chat_id, f"Item {num} not found in *{list_name}*.")
+
+
+def handle_due(chat_id, args):
+    """Set a due date on an item. Usage: /due todo 2 tomorrow"""
+    parts = args.split(None, 2) if args else []
+    if len(parts) < 3:
+        send_message(chat_id, "Usage: /due <list> <number> <date>")
+        return
+    list_name = parts[0]
+    if not parts[1].isdigit():
+        send_message(chat_id, "Usage: /due <list> <number> <date>")
+        return
+    num = int(parts[1])
+    if not db.list_exists(list_name):
+        send_message(chat_id, f"No list called *{list_name}*.")
+        return
+    # Reuse the date parser
+    _, due_date = parse_due_date(f"placeholder due:{parts[2]}")
+    if not due_date:
+        send_message(chat_id, f"Couldn't parse date: *{parts[2]}*\nTry: today, tomorrow, monday, or 2025-03-15")
+        return
+    if db.set_due_date(list_name, num, due_date):
+        send_message(chat_id, f"📅 Due date set: *{due_date}*")
+    else:
+        send_message(chat_id, f"Item {num} not found in *{list_name}*.")
+
+
+def handle_undue(chat_id, args):
+    """Remove a due date from an item. Usage: /undue todo 2"""
+    parts = args.split() if args else []
+    if len(parts) != 2 or not parts[1].isdigit():
+        send_message(chat_id, "Usage: /undue <list> <number>")
+        return
+    list_name, num = parts[0], int(parts[1])
+    if not db.list_exists(list_name):
+        send_message(chat_id, f"No list called *{list_name}*.")
+        return
+    if db.set_due_date(list_name, num, None):
+        send_message(chat_id, "📅 Due date removed.")
+    else:
+        send_message(chat_id, f"Item {num} not found in *{list_name}*.")
 
 
 def handle_clear(chat_id, args):
@@ -440,6 +543,14 @@ def handle_freeform(chat_id, text):
         send_message(chat_id, "Sorry, I couldn't parse that. Try again or use /help for commands.")
         return
 
+    # Process create_list actions first, so items can go into new lists
+    for action in actions:
+        if action.get("action") == "create_list":
+            new_list = action.get("list", "").lower()
+            desc = action.get("description", "")
+            if new_list and re.match(r"^[a-z][a-z0-9_]{0,29}$", new_list):
+                db.create_list(new_list, desc)
+
     responses = []
     for action in actions:
         a_type = action.get("action")
@@ -449,8 +560,13 @@ def handle_freeform(chat_id, text):
             item_text = action.get("text", "")
             due = action.get("due_date")
 
+            # Auto-create the list if it doesn't exist (instead of falling back to inbox)
             if not db.list_exists(list_name):
-                list_name = "inbox"
+                if re.match(r"^[a-z][a-z0-9_]{0,29}$", list_name):
+                    db.create_list(list_name)
+                    responses.append(f"📋 Created list *{list_name}*")
+                else:
+                    list_name = "inbox"
 
             db.add_item(list_name, item_text, due_date=due)
             due_msg = f" 📅 {due}" if due else ""
@@ -465,13 +581,37 @@ def handle_freeform(chat_id, text):
             note_str = f" — {notes}" if notes else ""
             responses.append(f"📊 Tracked *{type_}*{val_str}{note_str}")
 
+        elif a_type == "remove_item":
+            list_name = action.get("list", "").lower()
+            search_text = action.get("text", "")
+            if list_name and db.list_exists(list_name) and search_text:
+                pos, item = db.find_item_by_text(list_name, search_text)
+                if pos:
+                    removed = db.delete_item(list_name, pos)
+                    responses.append(f"🗑 Removed from *{list_name}*: _{removed}_")
+                else:
+                    responses.append(f"Couldn't find \"{search_text}\" in *{list_name}*.")
+            else:
+                responses.append(f"Couldn't find that item to remove.")
+
+        elif a_type == "mark_done":
+            list_name = action.get("list", "").lower()
+            search_text = action.get("text", "")
+            if list_name and db.list_exists(list_name) and search_text:
+                pos, item = db.find_item_by_text(list_name, search_text)
+                if pos:
+                    db.mark_done(list_name, pos)
+                    responses.append(f"✅ Done: _{item['text']}_")
+                else:
+                    responses.append(f"Couldn't find \"{search_text}\" in *{list_name}*.")
+            else:
+                responses.append(f"Couldn't find that item to mark done.")
+
         elif a_type == "create_list":
+            # Already processed above, just add response
             new_list = action.get("list", "").lower()
-            desc = action.get("description", "")
-            if new_list and re.match(r"^[a-z][a-z0-9_]{0,29}$", new_list):
-                ok, _ = db.create_list(new_list, desc)
-                if ok:
-                    responses.append(f"📋 Created list *{new_list}*")
+            if new_list and db.list_exists(new_list):
+                responses.append(f"📋 Created list *{new_list}*")
 
         elif a_type == "query":
             query_type = action.get("type", "show_all")
@@ -549,7 +689,12 @@ COMMAND_WITH_ARGS_MAP = {
     "rename": handle_rename,
     "done": handle_done,
     "undo": handle_undo,
+    "remove": handle_remove,
+    "edit": handle_edit,
+    "due": handle_due,
+    "undue": handle_undue,
     "clear": handle_clear,
+    "move": handle_move,
     "track": handle_track,
     "newhabit": handle_newhabit,
     "deletehabit": handle_deletehabit,
