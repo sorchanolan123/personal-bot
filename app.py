@@ -5,7 +5,7 @@ import random
 import db
 from config import CRON_SECRET, CHAT_ID
 from telegram import parse_update, send_message, send_document
-from handlers import handle_message, handle_callback
+from handlers import handle_message, handle_callback, handle_evening
 from morning import build_briefing
 
 app = Flask(__name__)
@@ -66,38 +66,8 @@ def trigger_evening():
     if not CHAT_ID:
         return jsonify({"error": "CHAT_ID not configured"}), 500
 
-    lines = ["🌙 *Evening check-in*\n"]
-
-    # How did focus items go?
-    focus = db.get_daily_focus()
-    if focus:
-        done_count = sum(1 for f in focus if f["done"])
-        total = len(focus)
-        lines.append(f"*Focus:* {done_count}/{total} completed")
-        for item in focus:
-            status = "✅" if item["done"] else "⬜"
-            lines.append(f"  {status} {item['text']}")
-        lines.append("")
-
-    # Habits not yet logged
-    habits = db.get_habits()
-    logged = db.get_habits_logged_today()
-    unlogged = [h for h in habits if h["name"] not in logged]
-    if unlogged:
-        lines.append("🔄 *Habits not logged yet:*")
-        for h in unlogged:
-            lines.append(f"  ⬜ {h['name']} — /log {h['name']}")
-        lines.append("")
-
-    # Pending count
-    pending = db.get_all_pending()
-    if pending:
-        lines.append(f"📋 {len(pending)} item(s) still pending.")
-
-    lines.append("\nAnything to capture before bed? Just type it.")
-
-    result = send_message(CHAT_ID, "\n".join(lines))
-    return jsonify({"status": "sent", "ok": result.get("ok", False)})
+    handle_evening(CHAT_ID)
+    return jsonify({"status": "sent"})
 
 
 @app.route("/trigger/stale", methods=["GET", "POST"])

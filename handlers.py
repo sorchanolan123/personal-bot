@@ -383,6 +383,50 @@ def handle_briefing(chat_id):
     send_message(chat_id, build_briefing())
 
 
+def handle_evening(chat_id):
+    """Evening check-in: today's progress + unlogged habits with buttons."""
+    lines = ["🌙 *Evening check-in*\n"]
+
+    today_items = db.get_focus_today()
+    done = [i for i in today_items if i["done"]]
+    remaining = [i for i in today_items if not i["done"]]
+
+    if done:
+        lines.append(f"✅ *Completed today:* {len(done)}")
+        for item in done:
+            lines.append(f"  ✅ ~{item['text']}~")
+        lines.append("")
+
+    if remaining:
+        lines.append(f"⬜ *Still to do:* {len(remaining)}")
+        for item in remaining:
+            lines.append(f"  ⬜ {item['text']}")
+        lines.append("")
+
+    if not today_items:
+        lines.append("Nothing was due today.\n")
+
+    habits = db.get_habits()
+    logged = db.get_habits_logged_today()
+    unlogged = [h for h in habits if h["name"] not in logged]
+
+    keyboard = None
+    if unlogged:
+        lines.append("🔄 *Habits not logged yet:*")
+        buttons = []
+        for h in unlogged:
+            streak = db.get_habit_streak(h["name"])
+            streak_str = f" ({streak}🔥)" if streak > 0 else ""
+            lines.append(f"  ⬜ {h['name']}{streak_str}")
+            buttons.append([(f"✅ Log {h['name']}", f"habit:{h['name']}")])
+        keyboard = make_keyboard(buttons)
+        lines.append("")
+
+    lines.append("Anything to capture before bed? Just type it.")
+
+    send_message(chat_id, "\n".join(lines), reply_markup=keyboard)
+
+
 # --- Focus ---
 
 def handle_focus(chat_id):
@@ -831,6 +875,7 @@ COMMAND_MAP = {
     "lists": handle_lists,
     "all": handle_all,
     "briefing": handle_briefing,
+    "evening": handle_evening,
     "focus": handle_focus,
     "habits": handle_habits,
 }

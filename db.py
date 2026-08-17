@@ -7,7 +7,7 @@ RESERVED_COMMANDS = {
     "start", "help", "newlist", "deletelist", "lists", "done",
     "undo", "clear", "all", "briefing", "rename", "move", "remove",
     "edit", "due", "undue", "track", "habits", "newhabit",
-    "deletehabit", "log", "focus", "skip",
+    "deletehabit", "log", "focus", "evening", "skip",
 }
 
 
