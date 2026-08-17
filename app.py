@@ -308,6 +308,28 @@ def trigger_backup():
     return jsonify({"status": "sent", "ok": result.get("ok", False)})
 
 
+# --- Webhook health check ---
+
+@app.route("/trigger/healthcheck", methods=["GET", "POST"])
+def trigger_healthcheck():
+    """Re-register webhook if Telegram has dropped it."""
+    if not check_cron_secret():
+        return jsonify({"error": "unauthorized"}), 403
+
+    from telegram import get_webhook_info, set_webhook
+    from config import WEBHOOK_URL
+
+    info = get_webhook_info().get("result", {})
+    current_url = info.get("url", "")
+    last_error = info.get("last_error_message", "")
+
+    if current_url != WEBHOOK_URL or last_error:
+        set_webhook(WEBHOOK_URL)
+        return jsonify({"status": "re-registered", "reason": last_error or "url mismatch"})
+
+    return jsonify({"status": "ok", "url": current_url})
+
+
 # --- Health check ---
 
 @app.route("/", methods=["GET"])
