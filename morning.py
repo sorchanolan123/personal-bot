@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import CHAT_ID
-from db import (init_db, get_overdue, get_due_today, get_stale_items,
+from db import (init_db, get_overdue, get_due_today,
                 get_completed_since, get_focus_items, set_daily_focus,
                 get_habits, get_habit_streak)
 from telegram import send_message
@@ -36,7 +36,7 @@ def build_briefing():
     if overdue:
         lines.append("🔴 *Overdue:*")
         for item in overdue:
-            lines.append(f"  • {item['text']} (was due {item['due_date']}) — /{item['list_name']}")
+            lines.append(f"  • {item['text']} (was due {item['due_date']})")
         lines.append("")
 
     # Due today
@@ -44,10 +44,10 @@ def build_briefing():
     if due_today:
         lines.append("📅 *Due today:*")
         for item in due_today:
-            lines.append(f"  • {item['text']} — /{item['list_name']}")
+            lines.append(f"  • {item['text']}")
         lines.append("")
 
-    # Today's focus — pick 3-5 items
+    # Today's focus — pick up to 5 items from todo list
     focus = get_focus_items(limit=5)
     if focus:
         set_daily_focus([item["text"] for item in focus])
@@ -56,23 +56,19 @@ def build_briefing():
             due = f" 📅 {item['due_date']}" if item["due_date"] else ""
             lines.append(f"  {i}. {item['text']}{due}")
         lines.append("")
+        lines.append("Tick off with /done\\_focus <number>")
     else:
-        lines.append("🎉 Nothing pending! Enjoy your day.\n")
+        lines.append("🎉 Nothing on your todo list! Enjoy your day.\n")
 
     # Habits reminder
     habits = get_habits()
     if habits:
+        lines.append("")
         lines.append("🔄 *Habits to log today:*")
         for h in habits:
             streak = get_habit_streak(h["name"])
             streak_str = f" ({streak}🔥)" if streak > 0 else ""
             lines.append(f"  ⬜ {h['name']}{streak_str} — /log {h['name']}")
-        lines.append("")
-
-    # Stale items nudge
-    stale = get_stale_items(days=7)
-    if stale:
-        lines.append(f"💤 {len(stale)} item(s) untouched for 7+ days.")
 
     return "\n".join(lines)
 

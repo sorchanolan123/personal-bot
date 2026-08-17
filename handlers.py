@@ -362,42 +362,9 @@ def handle_all(chat_id):
 
 
 def handle_briefing(chat_id):
-    """Morning briefing: overdue, due today, then a summary of all lists."""
-    lines = ["☀️ *Morning Briefing*\n"]
-
-    overdue = db.get_overdue()
-    if overdue:
-        lines.append("🔴 *Overdue:*")
-        for item in overdue:
-            lines.append(f"  • {item['text']} (was due {item['due_date']}) — /{item['list_name']}")
-        lines.append("")
-
-    due_today = db.get_due_today()
-    if due_today:
-        lines.append("📅 *Due today:*")
-        for item in due_today:
-            lines.append(f"  • {item['text']} — /{item['list_name']}")
-        lines.append("")
-
-    all_pending = db.get_all_pending()
-    other = [i for i in all_pending if i not in overdue and i not in due_today]
-    if other:
-        grouped = {}
-        for item in other:
-            grouped.setdefault(item["list_name"], []).append(item)
-        lines.append("📋 *Other pending:*")
-        for list_name, list_items in grouped.items():
-            lines.append(f"  *{list_name}:* {len(list_items)} item(s)")
-        lines.append("")
-
-    if not overdue and not due_today and not other:
-        lines.append("🎉 Nothing pending! Enjoy your day.")
-
-    stale = db.get_stale_items(days=7)
-    if stale:
-        lines.append(f"💤 {len(stale)} item(s) have been sitting for 7+ days.")
-
-    send_message(chat_id, "\n".join(lines))
+    """Morning briefing: just calls the same logic as the cron trigger."""
+    from morning import build_briefing
+    send_message(chat_id, build_briefing())
 
 
 # --- Focus ---
