@@ -22,10 +22,13 @@ def webhook():
 
     chat_id, text, callback = parse_update(update)
 
-    if callback and chat_id:
-        handle_callback(chat_id, callback)
-    elif chat_id and text:
-        handle_message(chat_id, text)
+    try:
+        if callback and chat_id:
+            handle_callback(chat_id, callback)
+        elif chat_id and text:
+            handle_message(chat_id, text)
+    except Exception as e:
+        print(f"Error handling update: {e}")
 
     return jsonify({"status": "ok"})
 
