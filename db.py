@@ -165,9 +165,13 @@ def add_item(list_name, text, due_date=None, metadata=None):
 def get_items(list_name, include_done=False):
     conn = get_db()
     if include_done:
+        # Show pending items + items completed in the last 24 hours
+        cutoff = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
         items = conn.execute(
-            "SELECT * FROM items WHERE list_name = ? ORDER BY done, created_at",
-            (list_name.lower(),)
+            "SELECT * FROM items WHERE list_name = ? "
+            "AND (done = 0 OR completed_at >= ?) "
+            "ORDER BY done, created_at",
+            (list_name.lower(), cutoff)
         ).fetchall()
     else:
         items = conn.execute(

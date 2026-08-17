@@ -81,12 +81,12 @@ def format_items(items, list_name, show_done=False, with_buttons=False):
             due = ""
             if item["due_date"]:
                 due = f" 📅 {item['due_date']}"
-            lines.append(f"  {num}. {item['text']}{tag}{due}")
             if with_buttons:
-                buttons.append([
-                    (f"✅ {num}", f"done:{base_list}:{num}"),
-                    (f"🗑 {num}", f"del:{base_list}:{num}"),
-                ])
+                # Item text goes on the button itself
+                label = f"⬜ {item['text']}{tag}{due}"
+                buttons.append([(label, f"done:{base_list}:{num}")])
+            else:
+                lines.append(f"  {num}. {item['text']}{tag}{due}")
             num += 1
 
     text = "\n".join(lines)
@@ -793,20 +793,6 @@ def handle_callback(chat_id, callback):
             edit_message(chat_id, message_id, text, reply_markup=keyboard)
         else:
             answer_callback(callback_id, "Item not found")
-
-    elif action == "del" and len(parts) == 3:
-        list_name, num = parts[1], int(parts[2])
-        if db.list_exists(list_name):
-            removed = db.delete_item(list_name, num)
-            if removed:
-                answer_callback(callback_id, f"🗑 Removed: {removed}")
-                items = db.get_items(list_name, include_done=True)
-                text, keyboard = format_items(items, list_name, show_done=True, with_buttons=True)
-                edit_message(chat_id, message_id, text, reply_markup=keyboard)
-            else:
-                answer_callback(callback_id, "Item not found")
-        else:
-            answer_callback(callback_id, "List not found")
 
     elif action == "focus" and len(parts) == 2:
         num = int(parts[1])
