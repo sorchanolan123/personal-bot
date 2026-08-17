@@ -190,22 +190,15 @@ def trigger_smallthing():
     return jsonify({"status": "sent", "ok": result.get("ok", False)})
 
 
-# --- Weekly wins ---
+# --- Weekly review ---
 
-@app.route("/trigger/weekly", methods=["GET", "POST"])
-def trigger_weekly():
-    """Sunday weekly summary with stats and optional LLM narrative."""
-    if not check_cron_secret():
-        return jsonify({"error": "unauthorized"}), 403
-    if not CHAT_ID:
-        return jsonify({"error": "CHAT_ID not configured"}), 500
-
+def build_wins_data():
+    """Gather this week's stats into a dict for the review."""
     completed = db.get_completed_since(days=7)
     tracking = db.get_tracking_since(days=7)
     habit_logs = db.get_habit_logs_since(days=7)
     habits = db.get_habits()
 
-    # Build habit summary
     habit_summary = []
     for h in habits:
         days_logged = len(set(
@@ -214,46 +207,70 @@ def trigger_weekly():
         streak = db.get_habit_streak(h["name"])
         habit_summary.append({"name": h["name"], "days_logged": days_logged, "streak": streak})
 
-    # Try LLM summary first
-    try:
-        from llm import generate_weekly_summary
-        llm_summary = generate_weekly_summary(completed, tracking, habit_summary)
-    except Exception:
-        llm_summary = None
+    return {
+        "completed": [{"list": i["list_name"], "text": i["text"]} for i in completed],
+        "tracking": [{"type": t["type"], "value": t["value"], "notes": t["notes"],
+                       "date": t["created_at"][:10]} for t in tracking],
+        "habits": habit_summary,
+    }
 
-    if llm_summary:
-        msg = f"🏆 *Weekly Wins*\n\n{llm_summary}"
-    else:
-        # Fallback: simple stats
-        lines = ["🏆 *Weekly Wins*\n"]
-        lines.append(f"✅ *Completed:* {len(completed)} item(s)")
-        if completed:
-            for item in completed[:10]:
-                lines.append(f"  • {item['text']}")
 
-        if tracking:
-            # Group tracking by type
-            types = {}
-            for t in tracking:
-                types.setdefault(t["type"], []).append(t)
-            lines.append("")
-            lines.append("📊 *Tracking:*")
-            for type_, entries in types.items():
-                values = [e["value"] for e in entries if e["value"] is not None]
-                if values:
-                    avg = sum(values) / len(values)
-                    lines.append(f"  {type_}: {len(entries)} entries, avg {avg:.1f}")
-                else:
-                    lines.append(f"  {type_}: {len(entries)} entries")
+def format_wins_stats(wins_data):
+    """Format wins data as a readable Telegram message."""
+    lines = []
 
-        if habit_summary:
-            lines.append("")
-            lines.append("🔄 *Habits:*")
-            for h in habit_summary:
-                streak_str = f" ({h['streak']}🔥)" if h["streak"] > 0 else ""
-                lines.append(f"  {h['name']}: {h['days_logged']}/7 days{streak_str}")
+    completed = wins_data.get("completed", [])
+    lines.append(f"✅ *Completed:* {len(completed)} item(s)")
+    for item in completed[:10]:
+        lines.append(f"  • {item['text']}")
+    if len(completed) > 10:
+        lines.append(f"  ...and {len(completed) - 10} more")
 
-        msg = "\n".join(lines)
+    tracking = wins_data.get("tracking", [])
+    if tracking:
+        types = {}
+        for t in tracking:
+            types.setdefault(t["type"], []).append(t)
+        lines.append("")
+        lines.append("📊 *Tracking:*")
+        for type_, entries in types.items():
+            values = [e["value"] for e in entries if e["value"] is not None]
+            if values:
+                avg = sum(values) / len(values)
+                lines.append(f"  {type_}: {len(entries)} entries, avg {avg:.1f}")
+            else:
+                lines.append(f"  {type_}: {len(entries)} entries")
+
+    habits = wins_data.get("habits", [])
+    if habits:
+        lines.append("")
+        lines.append("🔄 *Habits:*")
+        for h in habits:
+            streak_str = f" ({h['streak']}🔥)" if h["streak"] > 0 else ""
+            lines.append(f"  {h['name']}: {h['days_logged']}/7 days{streak_str}")
+
+    return "\n".join(lines)
+
+
+@app.route("/trigger/weekly", methods=["GET", "POST"])
+def trigger_weekly():
+    """Start the interactive weekly review."""
+    if not check_cron_secret():
+        return jsonify({"error": "unauthorized"}), 403
+    if not CHAT_ID:
+        return jsonify({"error": "CHAT_ID not configured"}), 500
+
+    wins_data = build_wins_data()
+    db.start_weekly_review(wins_data)
+
+    stats = format_wins_stats(wins_data)
+    msg = (
+        f"🏆 *Weekly Review*\n\n"
+        f"{stats}\n\n"
+        f"---\n\n"
+        f"Let's reflect. *{db.REVIEW_QUESTIONS[0]}*\n\n"
+        f"(Type your answer, or /skip to skip)"
+    )
 
     result = send_message(CHAT_ID, msg)
     return jsonify({"status": "sent", "ok": result.get("ok", False)})

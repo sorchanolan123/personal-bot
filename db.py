@@ -7,7 +7,7 @@ RESERVED_COMMANDS = {
     "start", "help", "newlist", "deletelist", "lists", "done",
     "undo", "clear", "all", "briefing", "rename", "move", "remove",
     "edit", "due", "undue", "track", "habits", "newhabit",
-    "deletehabit", "log", "focus",
+    "deletehabit", "log", "focus", "skip",
 }
 
 
@@ -63,6 +63,18 @@ def init_db():
             text TEXT NOT NULL,
             done INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS weekly_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start TEXT NOT NULL,
+            step INTEGER DEFAULT 0,
+            wins_data TEXT DEFAULT '{}',
+            q1_answer TEXT,
+            q2_answer TEXT,
+            q3_answer TEXT,
+            summary TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT
         );
     """)
     conn.commit()
@@ -537,3 +549,88 @@ def mark_focus_done(item_number):
     conn.commit()
     conn.close()
     return True
+
+
+# --- Weekly review ---
+
+REVIEW_QUESTIONS = [
+    "What went well this week?",
+    "What didn't go as planned?",
+    "What do you want to focus on next week?",
+]
+
+
+def start_weekly_review(wins_data):
+    """Create a new review session. Returns the review id."""
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    # Expire any stale open reviews
+    conn.execute(
+        "UPDATE weekly_reviews SET completed_at = datetime('now') "
+        "WHERE completed_at IS NULL"
+    )
+    conn.execute(
+        "INSERT INTO weekly_reviews (week_start, step, wins_data) VALUES (?, 0, ?)",
+        (today, json.dumps(wins_data))
+    )
+    conn.commit()
+    review_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+    return review_id
+
+
+def get_active_review():
+    """Return the active (incomplete) review, or None."""
+    conn = get_db()
+    review = conn.execute(
+        "SELECT * FROM weekly_reviews WHERE completed_at IS NULL "
+        "ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return review
+
+
+def advance_review(review_id, answer):
+    """Store the answer for the current step and advance to the next."""
+    conn = get_db()
+    review = conn.execute(
+        "SELECT * FROM weekly_reviews WHERE id = ?", (review_id,)
+    ).fetchone()
+    if not review:
+        conn.close()
+        return None
+
+    step = review["step"]
+    col = f"q{step + 1}_answer"
+    next_step = step + 1
+
+    conn.execute(f"UPDATE weekly_reviews SET {col} = ?, step = ? WHERE id = ?",
+                 (answer, next_step, review_id))
+
+    if next_step >= len(REVIEW_QUESTIONS):
+        conn.execute(
+            "UPDATE weekly_reviews SET completed_at = datetime('now') WHERE id = ?",
+            (review_id,)
+        )
+
+    conn.commit()
+    conn.close()
+    return next_step
+
+
+def save_review_summary(review_id, summary):
+    conn = get_db()
+    conn.execute("UPDATE weekly_reviews SET summary = ? WHERE id = ?",
+                 (summary, review_id))
+    conn.commit()
+    conn.close()
+
+
+def get_past_reviews(limit=4):
+    conn = get_db()
+    reviews = conn.execute(
+        "SELECT * FROM weekly_reviews WHERE completed_at IS NOT NULL "
+        "ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return reviews

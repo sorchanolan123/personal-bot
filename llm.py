@@ -120,3 +120,23 @@ def generate_weekly_summary(completed_items, tracking_data, habit_data):
 
     result = call_haiku(system, user_msg)
     return result or "Couldn't generate summary this week — but you're doing great regardless. 💪"
+
+
+def generate_review_summary(wins_data, answers):
+    """Generate a combined weekly review summary from stats + reflections."""
+    system = """You are a kind, encouraging personal assistant writing a weekly review summary for someone who struggles with executive function. Combine their stats with their own reflections into a short, meaningful summary. Be warm but concise. Don't be patronising. Keep it under 250 words. Return plain text formatted for Telegram (use *bold* for emphasis)."""
+
+    user_msg = f"""Here's the data for this week:
+
+*Stats:*
+{json.dumps(wins_data, indent=2)}
+
+*Their reflections:*
+What went well: {answers.get('q1', 'skipped')}
+What didn't go as planned: {answers.get('q2', 'skipped')}
+Focus for next week: {answers.get('q3', 'skipped')}
+
+Write a combined weekly review that weaves together the stats and their reflections. End with their focus for next week."""
+
+    result = call_haiku(system, user_msg)
+    return result or "Review saved — keep going. 💪"

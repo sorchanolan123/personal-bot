@@ -688,6 +688,62 @@ def handle_list_command(chat_id, list_name, args):
 
 # --- Main dispatcher ---
 
+# --- Weekly review ---
+
+def handle_review_response(chat_id, text):
+    """Handle a message while a review is active. Returns True if consumed."""
+    review = db.get_active_review()
+    if not review:
+        return False
+
+    step = review["step"]
+    if step >= len(db.REVIEW_QUESTIONS):
+        return False
+
+    # /skip skips the current question
+    is_skip = text.strip().lower() in ("skip", "/skip")
+    answer = None if is_skip else text
+
+    next_step = db.advance_review(review["id"], answer or "skipped")
+
+    if next_step is not None and next_step < len(db.REVIEW_QUESTIONS):
+        # Ask next question
+        send_message(chat_id,
+                     f"*{db.REVIEW_QUESTIONS[next_step]}*\n\n(Type your answer, or /skip)")
+    elif next_step is not None:
+        # All questions done — generate summary
+        answers = {
+            "q1": review["q1_answer"] if step > 0 else (answer or "skipped"),
+            "q2": review["q2_answer"] if step > 1 else (answer or "skipped"),
+            "q3": answer or "skipped",
+        }
+        # Re-read to get all stored answers
+        final = db.get_past_reviews(limit=1)
+        if final:
+            r = final[0]
+            answers = {
+                "q1": r["q1_answer"] or "skipped",
+                "q2": r["q2_answer"] or "skipped",
+                "q3": r["q3_answer"] or "skipped",
+            }
+
+        wins_data = json.loads(review["wins_data"] or "{}")
+
+        try:
+            from llm import generate_review_summary
+            summary = generate_review_summary(wins_data, answers)
+        except Exception:
+            summary = None
+
+        if summary:
+            db.save_review_summary(review["id"], summary)
+            send_message(chat_id, f"📝 *Your Weekly Review*\n\n{summary}")
+        else:
+            send_message(chat_id, "📝 Review saved. Thanks for reflecting!")
+
+    return True
+
+
 COMMAND_MAP = {
     "start": handle_start,
     "help": handle_help,
@@ -751,6 +807,10 @@ def handle_message(chat_id, text):
     # Dynamic list command (if the first word matches a list name)
     if db.list_exists(command):
         handle_list_command(chat_id, command, args)
+        return
+
+    # If a weekly review is active, treat as a review answer
+    if handle_review_response(chat_id, text.lstrip("/")):
         return
 
     # Nothing matched — send to LLM for freeform parsing
