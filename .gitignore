@@ -2,6 +2,8 @@ config.py
 bot.db
 bot.db-journal
 bot.db-wal
+bot.db-shm
 backups/
 __pycache__/
 *.pyc
+.pytest_cache/

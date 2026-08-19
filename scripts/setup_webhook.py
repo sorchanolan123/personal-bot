@@ -3,7 +3,7 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from config import WEBHOOK_URL
 from telegram import set_webhook, get_webhook_info

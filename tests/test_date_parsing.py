@@ -1,8 +1,12 @@
 """Tests for date parsing in handlers.py."""
 
+import sys
+import os
 import datetime as dt
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from handlers import parse_due_date, _resolve_date_word, _resolve_ordinal_day
 
