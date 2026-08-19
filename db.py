@@ -58,12 +58,6 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (habit_name) REFERENCES habits(name) ON DELETE CASCADE
         );
-        CREATE TABLE IF NOT EXISTS daily_focus (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            text TEXT NOT NULL,
-            done INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
         CREATE TABLE IF NOT EXISTS weekly_reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             week_start TEXT NOT NULL,
@@ -114,11 +108,15 @@ def rename_list(old_name, new_name):
         return False, "reserved"
     conn = get_db()
     try:
-        conn.execute("UPDATE items SET list_name = ? WHERE list_name = ?", (new_name, old_name))
+        # Temporarily disable FK checks — items reference the old name
+        conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("UPDATE lists SET name = ? WHERE name = ?", (new_name, old_name))
+        conn.execute("UPDATE items SET list_name = ? WHERE list_name = ?", (new_name, old_name))
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.commit()
         return True, "renamed"
     except sqlite3.IntegrityError:
+        conn.execute("PRAGMA foreign_keys=ON")
         return False, "exists"
     finally:
         conn.close()
@@ -512,41 +510,6 @@ def get_habit_logs_since(days=7):
     ).fetchall()
     conn.close()
     return rows
-
-
-# --- Daily focus ---
-
-def set_daily_focus(items):
-    """Clear today's focus and set new items."""
-    conn = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
-    conn.execute("DELETE FROM daily_focus WHERE date(created_at) = ?", (today,))
-    for text in items:
-        conn.execute("INSERT INTO daily_focus (text) VALUES (?)", (text,))
-    conn.commit()
-    conn.close()
-
-
-def get_daily_focus():
-    conn = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
-    items = conn.execute(
-        "SELECT * FROM daily_focus WHERE date(created_at) = ? ORDER BY id",
-        (today,)
-    ).fetchall()
-    conn.close()
-    return items
-
-
-def mark_focus_done(item_number):
-    items = get_daily_focus()
-    if item_number < 1 or item_number > len(items):
-        return False
-    conn = get_db()
-    conn.execute("UPDATE daily_focus SET done = 1 WHERE id = ?", (items[item_number - 1]["id"],))
-    conn.commit()
-    conn.close()
-    return True
 
 
 # --- Weekly review ---

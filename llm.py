@@ -106,22 +106,6 @@ Rules:
         return None
 
 
-def generate_weekly_summary(completed_items, tracking_data, habit_data):
-    """Generate a natural-language weekly summary using Haiku."""
-    system = """You are a kind, encouraging personal assistant writing a weekly summary for someone who struggles with executive function. Be warm but concise. Use emoji sparingly. Focus on wins and patterns. Don't be patronising. Keep it under 200 words. Return plain text formatted for Telegram (use *bold* for emphasis)."""
-
-    data = {
-        "completed_tasks": [{"list": i["list_name"], "text": i["text"]} for i in completed_items],
-        "tracking": [{"type": t["type"], "value": t["value"], "notes": t["notes"], "date": t["created_at"][:10]} for t in tracking_data],
-        "habits": habit_data,
-    }
-
-    user_msg = f"Here's my data for this week:\n\n{json.dumps(data, indent=2)}\n\nWrite my weekly wins summary."
-
-    result = call_haiku(system, user_msg)
-    return result or "Couldn't generate summary this week — but you're doing great regardless. 💪"
-
-
 def generate_review_summary(wins_data, answers):
     """Generate a combined weekly review summary from stats + reflections."""
     system = """You are a kind, encouraging personal assistant writing a weekly review summary for someone who struggles with executive function. Combine their stats with their own reflections into a short, meaningful summary. Be warm but concise. Don't be patronising. Keep it under 250 words. Return plain text formatted for Telegram (use *bold* for emphasis)."""

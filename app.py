@@ -4,7 +4,7 @@ import os
 import random
 import db
 from config import CRON_SECRET, CHAT_ID
-from telegram import parse_update, send_message, send_document
+from telegram import parse_update, send_message, send_document, make_keyboard
 from handlers import handle_message, handle_callback, handle_evening
 from morning import build_briefing
 
@@ -131,12 +131,15 @@ def trigger_habits():
         return jsonify({"status": "all logged"})
 
     lines = ["🔄 *Habit reminder*\n"]
+    buttons = []
     for h in unlogged:
         streak = db.get_habit_streak(h["name"])
         streak_str = f" ({streak}🔥)" if streak > 0 else ""
-        lines.append(f"  ⬜ {h['name']}{streak_str} — /log {h['name']}")
+        lines.append(f"  ⬜ {h['name']}{streak_str}")
+        buttons.append([(f"✅ Log {h['name']}", f"habit:{h['name']}")])
 
-    result = send_message(CHAT_ID, "\n".join(lines))
+    keyboard = make_keyboard(buttons) if buttons else None
+    result = send_message(CHAT_ID, "\n".join(lines), reply_markup=keyboard)
     return jsonify({"status": "sent", "ok": result.get("ok", False)})
 
 

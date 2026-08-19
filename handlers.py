@@ -13,39 +13,92 @@ LIST_CATEGORIES = {
 
 # --- Date parsing ---
 
+DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+def _resolve_date_word(word):
+    """Convert a date word to a YYYY-MM-DD string, or None."""
+    word = word.lower()
+    if word in ("today", "tonight"):
+        return datetime.now().strftime("%Y-%m-%d")
+    if word == "tomorrow":
+        return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    if word in DAY_NAMES:
+        today = datetime.now()
+        target = DAY_NAMES.index(word)
+        delta = (target - today.weekday()) % 7
+        if delta == 0:
+            delta = 7
+        return (today + timedelta(days=delta)).strftime("%Y-%m-%d")
+    # Try ISO date
+    try:
+        datetime.strptime(word, "%Y-%m-%d")
+        return word
+    except ValueError:
+        return None
+
+
+def _resolve_ordinal_day(day_num):
+    """Given a day-of-month int (1-31), return the next occurrence as YYYY-MM-DD."""
+    today = datetime.now()
+    # Try this month first
+    try:
+        candidate = today.replace(day=day_num)
+        if candidate.date() >= today.date():
+            return candidate.strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    # Otherwise next month
+    if today.month == 12:
+        next_month = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        next_month = today.replace(month=today.month + 1, day=1)
+    try:
+        return next_month.replace(day=day_num).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def parse_due_date(text):
     """Extract a due date from item text. Returns (clean_text, date_string|None).
 
     Supported formats:
-        due:today  due:tomorrow  due:monday  due:2025-03-15
+        "ring dad today"          → ("ring dad", today's date)
+        "buy milk tomorrow"       → ("buy milk", tomorrow's date)
+        "submit report friday"    → ("submit report", next friday)
+        "call dentist due:monday" → ("call dentist", next monday)
+        "meeting 2025-03-15"      → ("meeting", "2025-03-15")
+        "dentist on the 5th"      → ("dentist", next 5th)
+        "submit report on the 23rd" → ("submit report", next 23rd)
     """
+    # First try explicit due: prefix
     match = re.search(r"\s*due:(\S+)", text, re.IGNORECASE)
-    if not match:
-        return text, None
+    if match:
+        raw = match.group(1).lower()
+        date = _resolve_date_word(raw)
+        if date:
+            clean = text[: match.start()] + text[match.end() :]
+            return clean.strip(), date
 
-    clean = text[: match.start()] + text[match.end() :]
-    raw = match.group(1).lower()
+    # Try trailing "on the 5th" / "on the 23rd" pattern
+    ordinal_match = re.search(
+        r"\s+on\s+the\s+(\d{1,2})\s*(?:st|nd|rd|th)\s*$", text, re.IGNORECASE
+    )
+    if ordinal_match:
+        day_num = int(ordinal_match.group(1))
+        if 1 <= day_num <= 31:
+            date = _resolve_ordinal_day(day_num)
+            if date:
+                return text[: ordinal_match.start()].strip(), date
 
-    if raw == "today":
-        return clean.strip(), datetime.now().strftime("%Y-%m-%d")
-    if raw == "tomorrow":
-        return clean.strip(), (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    # Then try trailing date word: "ring dad today", "buy milk friday"
+    words = text.rsplit(None, 1)
+    if len(words) == 2:
+        last = words[1].lower().rstrip(".,!?")
+        date = _resolve_date_word(last)
+        if date:
+            return words[0].strip(), date
 
-    day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    if raw in day_names:
-        today = datetime.now()
-        target = day_names.index(raw)
-        delta = (target - today.weekday()) % 7
-        if delta == 0:
-            delta = 7
-        return clean.strip(), (today + timedelta(days=delta)).strftime("%Y-%m-%d")
-
-    # Try ISO date
-    try:
-        datetime.strptime(raw, "%Y-%m-%d")
-        return clean.strip(), raw
-    except ValueError:
-        return text, None
+    return text, None
 
 
 # --- Response formatters ---
@@ -732,7 +785,7 @@ def handle_list_command(chat_id, list_name, args):
     text, due_date = parse_due_date(args)
     db.add_item(list_name, text, due_date=due_date)
     due_msg = f" (due {due_date})" if due_date else ""
-    send_message(chat_id, f"➕ Added to *{list_name}*{due_msg}")
+    send_message(chat_id, f"➕ Added to *{list_name}*: _{text}_{due_msg}")
 
 
 # --- Main dispatcher ---
@@ -760,14 +813,9 @@ def handle_review_response(chat_id, text):
         send_message(chat_id,
                      f"*{db.REVIEW_QUESTIONS[next_step]}*\n\n(Type your answer, or /skip)")
     elif next_step is not None:
-        # All questions done — generate summary
-        answers = {
-            "q1": review["q1_answer"] if step > 0 else (answer or "skipped"),
-            "q2": review["q2_answer"] if step > 1 else (answer or "skipped"),
-            "q3": answer or "skipped",
-        }
-        # Re-read to get all stored answers
+        # All questions done — read back the stored answers
         final = db.get_past_reviews(limit=1)
+        answers = {"q1": "skipped", "q2": "skipped", "q3": "skipped"}
         if final:
             r = final[0]
             answers = {
