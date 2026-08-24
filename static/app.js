@@ -884,23 +884,6 @@ async function waitForServer(maxWait = 30000) {
   }
 }
 
-// --- Refresh ---
-
-async function refresh() {
-  const btn = $(".refresh-btn");
-  btn.classList.add("spinning");
-  if (currentTab === "today") {
-    await loadDashboard();
-  } else if (currentTab === "track") {
-    await loadTrack();
-  } else if (currentList) {
-    await openList(currentList);
-  } else {
-    await loadLists();
-  }
-  setTimeout(() => btn.classList.remove("spinning"), 600);
-}
-
 // --- Init ---
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -915,9 +898,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Enter") sendCapture();
   });
   $(".capture-send").addEventListener("click", sendCapture);
-
-  // Refresh
-  $(".refresh-btn").addEventListener("click", refresh);
 
   // Start
   checkAuth();
