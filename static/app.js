@@ -856,15 +856,24 @@ async function triggerDeploy() {
     const d = await res.json();
     toast(d.git || d.message || "Deployed! 🚀");
   } catch {
-    // Expected — the reload may kill the connection
-    toast("Deploy triggered — reloading 🚀");
+    toast("Deploy triggered 🚀");
   }
 
-  setTimeout(() => {
-    btn.classList.remove("spinning");
-    // Reload the PWA after a short delay to pick up any frontend changes
-    setTimeout(() => window.location.reload(), 3000);
-  }, 1000);
+  // Poll until the server is back, then reload
+  btn.classList.remove("spinning");
+  await waitForServer();
+  window.location.reload();
+}
+
+async function waitForServer(maxWait = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const res = await fetch("/", { cache: "no-store" });
+      if (res.ok) return;
+    } catch {}
+  }
 }
 
 // --- Refresh ---
