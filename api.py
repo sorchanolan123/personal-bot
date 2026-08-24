@@ -329,6 +329,93 @@ def deploy_proxy():
         return jsonify({"status": "deployed", "message": "Reload triggered (response may have been cut short)"})
 
 
+# --- Tracking overview (habits + trackers with 7-day history) ---
+
+@api.route("/api/tracking/overview", methods=["GET"])
+@require_auth
+def tracking_overview():
+    from datetime import datetime, timedelta
+
+    # Build last 7 day labels
+    today = datetime.now().date()
+    days = [(today - timedelta(days=6 - i)) for i in range(7)]
+    day_strs = [d.strftime("%Y-%m-%d") for d in days]
+    day_labels = [d.strftime("%a") for d in days]
+
+    # --- Habits ---
+    habits_raw = db.get_habits()
+    logs = db.get_habit_logs_since(days=7)
+    logged_today = db.get_habits_logged_today()
+
+    # Build a set of (habit_name, day) from logs
+    log_set = set()
+    for log in logs:
+        if log["done"]:
+            log_set.add((log["habit_name"], log["day"]))
+
+    habits = []
+    for h in habits_raw:
+        week = [1 if (h["name"], d) in log_set else 0 for d in day_strs]
+        habits.append({
+            "name": h["name"],
+            "streak": db.get_habit_streak(h["name"]),
+            "done_today": h["name"] in logged_today,
+            "week": week,
+        })
+
+    # --- Trackers (numeric) ---
+    tracking_raw = db.get_tracking_since(days=7)
+
+    # Group by type, skip non-numeric and meta types
+    skip_types = {"morning_notes", "reflection", "gratitude", "evening_mood"}
+    type_data = {}
+    for t in tracking_raw:
+        if t["type"] in skip_types:
+            continue
+        if t["value"] is None:
+            continue
+        type_data.setdefault(t["type"], []).append({
+            "value": t["value"],
+            "date": t["created_at"][:10],
+            "notes": t["notes"],
+        })
+
+    trackers = []
+    for type_name, entries in sorted(type_data.items()):
+        # Build 7-day values (use latest entry per day)
+        day_vals = {}
+        for e in entries:
+            day_vals[e["date"]] = e["value"]  # last write wins
+
+        week = [day_vals.get(d) for d in day_strs]
+        latest = entries[0]["value"] if entries else None
+        trackers.append({
+            "type": type_name,
+            "week": week,
+            "latest": latest,
+        })
+
+    return jsonify({
+        "day_labels": day_labels,
+        "habits": habits,
+        "trackers": trackers,
+    })
+
+
+# --- Create habit ---
+
+@api.route("/api/habit", methods=["POST"])
+@require_auth
+def create_habit():
+    data = request.json or {}
+    name = data.get("name", "").strip().lower()
+    if not name:
+        return jsonify({"error": "empty"}), 400
+    if db.create_habit(name):
+        return jsonify({"ok": True, "name": name})
+    return jsonify({"error": "already exists"}), 409
+
+
 # --- Tracking history (for charts) ---
 
 @api.route("/api/tracking/<type_>", methods=["GET"])

@@ -623,6 +623,137 @@ textarea { min-height: 72px; }
 .edit-save:active { background: var(--accent-green-light); }
 .edit-cancel:active { background: var(--border); }
 
+/* === Track view === */
+.track-row {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.track-row:last-child { border-bottom: none; }
+
+.track-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.track-name { font-weight: 600; font-size: 14px; flex: 1; }
+.track-streak { font-size: 12px; color: var(--text-muted); }
+.track-latest {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+/* 7-day dot row (habits) */
+.dot-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.dot-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+.dot-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.15s;
+}
+.dot.filled {
+  background: var(--accent-green);
+}
+.dot.today {
+  border: 2px solid var(--primary);
+}
+
+/* 7-day bar chart (trackers) */
+.bar-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  height: 48px;
+}
+.bar-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  justify-content: flex-end;
+}
+.bar {
+  width: 100%;
+  max-width: 28px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary-light);
+  min-height: 2px;
+  transition: height 0.3s;
+}
+.bar.empty {
+  background: var(--border);
+  height: 2px !important;
+}
+.bar-val {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  min-height: 12px;
+}
+.bar-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Add new tracker form */
+.add-tracker-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px var(--shadow);
+  border: 1.5px dashed var(--border);
+}
+.add-tracker-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.add-tracker-type {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.type-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  color: var(--text-secondary);
+}
+.type-btn.selected {
+  border-color: var(--primary);
+  background: var(--primary-faint);
+  color: var(--primary);
+}
+.type-btn:active { background: var(--primary-faint); }
+
 /* === Responsive === */
 @media (min-width: 480px) {
   .content { max-width: 440px; margin: 0 auto; }

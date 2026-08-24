@@ -137,15 +137,15 @@ function renderDashboard() {
   }
   html += `</div>`;
 
-  // Habits
-  if (data.habits.length > 0) {
-    const done = data.habits.filter(h => h.done).length;
+  // Unlogged habits (compact — full view is in Track tab)
+  const unlogged = data.habits.filter(h => !h.done);
+  if (unlogged.length > 0) {
     html += `<div class="card">
       <div class="card-header">
-        <span class="emoji">🔄</span> Habits
-        <span class="count">${done}/${data.habits.length}</span>
+        <span class="emoji">🔄</span> Habits to log
+        <span class="count">${unlogged.length} left</span>
       </div>
-      ${data.habits.map(renderHabit).join("")}
+      ${unlogged.map(renderHabit).join("")}
     </div>`;
   }
 
@@ -440,6 +440,9 @@ function switchTab(tab) {
   if (tab === "today") {
     $(".app-header h1").innerHTML = `<span class="greeting">${greeting()}</span> 🧠`;
     loadDashboard();
+  } else if (tab === "track") {
+    $(".app-header h1").innerHTML = "📊 Track";
+    loadTrack();
   } else if (tab === "lists") {
     $(".app-header h1").innerHTML = "📋 Lists";
     loadLists();
@@ -653,6 +656,193 @@ function backToLists() {
   loadLists();
 }
 
+// --- Track view ---
+
+let trackData = null;
+
+async function loadTrack() {
+  const content = $(".content");
+  content.innerHTML = '<div class="loading">Loading</div>';
+
+  try {
+    const res = await api("/api/tracking/overview");
+    if (res.status === 401) { show("#login-screen"); return; }
+    trackData = await res.json();
+    renderTrack();
+  } catch {
+    content.innerHTML = '<div class="empty">Could not load tracking data.</div>';
+  }
+}
+
+function renderTrack() {
+  const { day_labels, habits, trackers } = trackData;
+  let html = "";
+
+  // Habits section
+  if (habits.length > 0) {
+    html += `<div class="card">
+      <div class="card-header">
+        <span class="emoji">🔄</span> Habits
+      </div>`;
+    for (const h of habits) {
+      html += renderHabitTrack(h, day_labels);
+    }
+    html += `</div>`;
+  }
+
+  // Trackers section
+  if (trackers.length > 0) {
+    html += `<div class="card">
+      <div class="card-header">
+        <span class="emoji">📈</span> Trackers
+      </div>`;
+    for (const t of trackers) {
+      html += renderTrackerChart(t, day_labels);
+    }
+    html += `</div>`;
+  }
+
+  if (habits.length === 0 && trackers.length === 0) {
+    html += '<div class="empty">No habits or trackers yet. Add one below!</div>';
+  }
+
+  // Add new section
+  html += renderAddTracker();
+
+  content.innerHTML = html;
+}
+
+function renderHabitTrack(habit, dayLabels) {
+  const streakStr = habit.streak > 0 ? `${habit.streak} 🔥` : "";
+  const logBtn = habit.done_today
+    ? `<button class="habit-btn logged">✅</button>`
+    : `<button class="habit-btn log" onclick="logHabitFromTrack('${escAttr(habit.name)}')">Log</button>`;
+
+  const dots = habit.week.map((val, i) => {
+    const filled = val ? "filled" : "";
+    const isToday = i === 6 ? "today" : "";
+    return `<div class="dot-day">
+      <div class="dot ${filled} ${isToday}"></div>
+      <span class="dot-label">${dayLabels[i]}</span>
+    </div>`;
+  }).join("");
+
+  return `<div class="track-row">
+    <div class="track-top">
+      <span class="track-name">${escHtml(habit.name)}</span>
+      <span class="track-streak">${streakStr}</span>
+      ${logBtn}
+    </div>
+    <div class="dot-row">${dots}</div>
+  </div>`;
+}
+
+function renderTrackerChart(tracker, dayLabels) {
+  const vals = tracker.week.map(v => v !== null ? v : 0);
+  const maxVal = Math.max(...vals, 1);
+
+  const bars = tracker.week.map((val, i) => {
+    if (val === null) {
+      return `<div class="bar-day">
+        <span class="bar-val"></span>
+        <div class="bar empty"></div>
+        <span class="bar-label">${dayLabels[i]}</span>
+      </div>`;
+    }
+    const pct = Math.max(10, (val / maxVal) * 100);
+    return `<div class="bar-day">
+      <span class="bar-val">${val}</span>
+      <div class="bar" style="height:${pct}%"></div>
+      <span class="bar-label">${dayLabels[i]}</span>
+    </div>`;
+  }).join("");
+
+  const latestStr = tracker.latest !== null ? tracker.latest : "—";
+
+  return `<div class="track-row">
+    <div class="track-top">
+      <span class="track-name">${escHtml(tracker.type)}</span>
+      <span class="track-latest">${latestStr}</span>
+    </div>
+    <div class="bar-row">${bars}</div>
+  </div>`;
+}
+
+function renderAddTracker() {
+  return `<div class="add-tracker-card">
+    <div class="card-header" style="margin-bottom:8px">
+      <span class="emoji">➕</span> Add new
+    </div>
+    <div class="add-tracker-type">
+      <button class="type-btn selected" id="type-habit" onclick="selectTrackerType('habit')">🔄 Habit</button>
+      <button class="type-btn" id="type-tracker" onclick="selectTrackerType('tracker')">📈 Tracker</button>
+    </div>
+    <div class="add-tracker-row">
+      <input type="text" class="add-item-input" id="new-tracker-input"
+             placeholder="e.g. meditate, read, stretch..."
+             onkeydown="if(event.key==='Enter')addNewTracker()">
+      <button class="add-item-btn" onclick="addNewTracker()">Add</button>
+    </div>
+    <div id="tracker-hint" style="font-size:12px;color:var(--text-muted);margin-top:6px">
+      Daily yes/no — did you do it today?
+    </div>
+  </div>`;
+}
+
+let newTrackerType = "habit";
+
+function selectTrackerType(type) {
+  newTrackerType = type;
+  $("#type-habit").classList.toggle("selected", type === "habit");
+  $("#type-tracker").classList.toggle("selected", type === "tracker");
+
+  const input = $("#new-tracker-input");
+  const hint = $("#tracker-hint");
+  if (type === "habit") {
+    input.placeholder = "e.g. meditate, read, stretch...";
+    hint.textContent = "Daily yes/no — did you do it today?";
+  } else {
+    input.placeholder = "e.g. mood, sleep, energy...";
+    hint.textContent = "Numeric value — log a number each day.";
+  }
+}
+
+async function addNewTracker() {
+  const input = $("#new-tracker-input");
+  const name = input.value.trim().toLowerCase();
+  if (!name) return;
+
+  if (newTrackerType === "habit") {
+    const res = await api("/api/habit", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    if (res.ok) {
+      toast(`Habit "${name}" created 🔄`);
+      input.value = "";
+      loadTrack();
+    } else {
+      const d = await res.json();
+      toast(d.error || "Failed to create");
+    }
+  } else {
+    // For trackers, just log a first entry with null to "register" it
+    // Or explain that they'll appear once logged
+    toast(`Start logging "${name}" via morning check-in or quick capture`);
+    input.value = "";
+  }
+}
+
+async function logHabitFromTrack(name) {
+  const res = await api(`/api/habit/${encodeURIComponent(name)}/log`, { method: "POST" });
+  if (res.ok) {
+    const d = await res.json();
+    const streakMsg = d.streak > 1 ? ` — ${d.streak} day streak! 🔥` : "";
+    toast(`Logged ${name}${streakMsg}`);
+    loadTrack();
+  }
+}
+
 // --- Deploy ---
 
 async function triggerDeploy() {
@@ -684,6 +874,8 @@ async function refresh() {
   btn.classList.add("spinning");
   if (currentTab === "today") {
     await loadDashboard();
+  } else if (currentTab === "track") {
+    await loadTrack();
   } else if (currentList) {
     await openList(currentList);
   } else {
