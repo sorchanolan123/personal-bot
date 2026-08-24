@@ -86,7 +86,7 @@ body {
 }
 
 /* === Main app === */
-.app-screen { padding: 0 0 80px; }
+.app-screen { padding: 0 0 130px; }
 
 .app-header {
   position: sticky;
@@ -349,19 +349,49 @@ textarea { min-height: 72px; }
 .habit-btn.log:active { background: var(--primary); color: white; }
 .habit-btn.logged { background: var(--accent-green-light); color: #4A7A4E; cursor: default; }
 
-/* === Quick capture === */
-.capture-bar {
+/* === Tab bar === */
+.tab-bar {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   background: var(--card);
   border-top: 1px solid var(--border);
-  padding: 12px 16px;
+  display: flex;
+  z-index: 25;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  transition: color 0.15s;
+}
+.tab.active { color: var(--primary); }
+.tab-icon { font-size: 20px; }
+.tab-label { letter-spacing: 0.3px; }
+
+/* === Quick capture === */
+.capture-bar {
+  position: fixed;
+  bottom: 50px;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
   display: flex;
   gap: 8px;
   z-index: 20;
-  box-shadow: 0 -2px 8px var(--shadow);
 }
 .capture-input {
   flex: 1;
@@ -471,9 +501,132 @@ textarea { min-height: 72px; }
 }
 .tracking-pill .pill-value { font-weight: 600; }
 
+/* === Lists view === */
+.list-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--card);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  box-shadow: 0 2px 8px var(--shadow);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.list-card:active { transform: scale(0.98); }
+.list-card-icon { font-size: 22px; }
+.list-card-info { flex: 1; }
+.list-card-name { font-weight: 600; font-size: 15px; }
+.list-card-desc { font-size: 12px; color: var(--text-secondary); margin-top: 1px; }
+.list-card-count {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.list-card-arrow { color: var(--text-muted); font-size: 14px; }
+
+/* === List detail header === */
+.list-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.back-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--primary);
+}
+.back-btn:active { background: var(--primary-faint); }
+.list-detail-title { font-size: 18px; font-weight: 700; flex: 1; }
+
+/* === Add item row === */
+.add-item-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.add-item-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--card);
+  outline: none;
+}
+.add-item-input:focus { border-color: var(--primary-light); }
+.add-item-input::placeholder { color: var(--text-muted); }
+.add-item-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.add-item-btn:active { background: #A85E3D; }
+
+/* === Item actions === */
+.item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.item-action-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+}
+.item-action-btn:hover, .item-action-btn:active { opacity: 1; background: var(--border); }
+
+/* === Edit inline === */
+.edit-row {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+.edit-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1.5px solid var(--primary-light);
+  border-radius: var(--radius-xs);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+}
+.edit-save, .edit-cancel {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.edit-save:active { background: var(--accent-green-light); }
+.edit-cancel:active { background: var(--border); }
+
 /* === Responsive === */
 @media (min-width: 480px) {
   .content { max-width: 440px; margin: 0 auto; }
   .capture-bar { max-width: 440px; left: 50%; transform: translateX(-50%); }
-  .toast { bottom: 76px; }
+  .tab-bar { max-width: 440px; left: 50%; transform: translateX(-50%); }
+  .toast { bottom: 130px; }
 }

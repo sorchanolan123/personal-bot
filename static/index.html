@@ -41,6 +41,18 @@
       <input type="text" class="capture-input" placeholder="What's on your mind?">
       <button class="capture-send">↑</button>
     </div>
+
+    <!-- Bottom tab bar -->
+    <nav class="tab-bar">
+      <button class="tab active" data-tab="today" onclick="switchTab('today')">
+        <span class="tab-icon">🎯</span>
+        <span class="tab-label">Today</span>
+      </button>
+      <button class="tab" data-tab="lists" onclick="switchTab('lists')">
+        <span class="tab-icon">📋</span>
+        <span class="tab-label">Lists</span>
+      </button>
+    </nav>
   </div>
 
   <!-- Toast -->

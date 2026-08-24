@@ -2,6 +2,8 @@
 
 const API = "";  // same origin
 let data = null;
+let currentTab = "today";
+let currentList = null;  // when viewing a specific list
 
 // --- Helpers ---
 
@@ -428,12 +430,241 @@ function escAttr(s) {
   return s.replace(/'/g, "\\'").replace(/"/g, '\\"');
 }
 
+// --- Tab switching ---
+
+function switchTab(tab) {
+  currentTab = tab;
+  currentList = null;
+  $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+
+  if (tab === "today") {
+    $(".app-header h1").innerHTML = `<span class="greeting">${greeting()}</span> 🧠`;
+    loadDashboard();
+  } else if (tab === "lists") {
+    $(".app-header h1").innerHTML = "📋 Lists";
+    loadLists();
+  }
+}
+
+// --- Lists view ---
+
+async function loadLists() {
+  const content = $(".content");
+  content.innerHTML = '<div class="loading">Loading</div>';
+
+  try {
+    const res = await api("/api/lists");
+    if (res.status === 401) { show("#login-screen"); return; }
+    const lists = await res.json();
+    renderLists(lists);
+  } catch {
+    content.innerHTML = '<div class="empty">Could not load lists.</div>';
+  }
+}
+
+function renderLists(lists) {
+  const content = $(".content");
+
+  if (lists.length === 0) {
+    content.innerHTML = '<div class="empty">No lists yet. Create one via Telegram with /newlist</div>';
+    return;
+  }
+
+  const html = lists.map(l => `
+    <div class="list-card" onclick="openList('${escAttr(l.name)}')">
+      <span class="list-card-icon">📋</span>
+      <div class="list-card-info">
+        <div class="list-card-name">${escHtml(l.name)}</div>
+        ${l.description ? `<div class="list-card-desc">${escHtml(l.description)}</div>` : ""}
+      </div>
+      <span class="list-card-count">${l.pending}</span>
+      <span class="list-card-arrow">›</span>
+    </div>
+  `).join("");
+
+  content.innerHTML = html;
+}
+
+// --- List detail view ---
+
+async function openList(name) {
+  currentList = name;
+  const content = $(".content");
+  content.innerHTML = '<div class="loading">Loading</div>';
+  $(".app-header h1").innerHTML = `📋 ${escHtml(name)}`;
+
+  try {
+    const res = await api(`/api/list/${encodeURIComponent(name)}`);
+    if (res.status === 401) { show("#login-screen"); return; }
+    const items = await res.json();
+    renderListDetail(name, items);
+  } catch {
+    content.innerHTML = '<div class="empty">Could not load list.</div>';
+  }
+}
+
+function renderListDetail(name, items) {
+  const content = $(".content");
+  const pending = items.filter(i => !i.done);
+  const done = items.filter(i => i.done);
+
+  let html = `
+    <div class="list-detail-header">
+      <button class="back-btn" onclick="backToLists()">←</button>
+      <span class="list-detail-title">${escHtml(name)}</span>
+      <span class="pending-badge" style="font-size:12px">${pending.length} pending</span>
+    </div>
+    <div class="add-item-row">
+      <input type="text" class="add-item-input" placeholder="Add an item..."
+             onkeydown="if(event.key==='Enter')addItemToList('${escAttr(name)}')">
+      <button class="add-item-btn" onclick="addItemToList('${escAttr(name)}')">Add</button>
+    </div>
+  `;
+
+  if (pending.length > 0) {
+    html += `<div class="card">
+      <ul class="item-list">${pending.map(i => renderListItem(i, name)).join("")}</ul>
+    </div>`;
+  }
+
+  if (done.length > 0) {
+    html += `<div class="section-label">Completed</div>
+    <div class="card" style="opacity:0.7">
+      <ul class="item-list">${done.map(i => renderListItem(i, name)).join("")}</ul>
+    </div>`;
+  }
+
+  if (items.length === 0) {
+    html += '<div class="empty">This list is empty. Add something above!</div>';
+  }
+
+  content.innerHTML = html;
+}
+
+function renderListItem(item, listName) {
+  const checked = item.done ? "checked" : "";
+  const textClass = item.done ? "done-text" : "";
+  const checkIcon = item.done ? "✓" : "";
+
+  let dueBadge = "";
+  if (item.due_date && !item.done) {
+    const today = new Date().toISOString().slice(0, 10);
+    const isOverdue = item.due_date < today;
+    const cls = isOverdue ? "item-due item-overdue" : "item-due";
+    dueBadge = ` <span class="${cls}">${item.due_date}</span>`;
+  }
+
+  return `<li class="item-row" id="item-${item.id}">
+    <div class="item-check ${checked}"
+         onclick="toggleListItem(${item.id}, ${item.done}, '${escAttr(listName)}')">${checkIcon}</div>
+    <div class="item-text ${textClass}" id="item-text-${item.id}">${escHtml(item.text)}${dueBadge}</div>
+    <div class="item-actions">
+      ${!item.done ? `<button class="item-action-btn" onclick="startEdit(${item.id}, '${escAttr(item.text)}')" title="Edit">✏️</button>` : ""}
+      <button class="item-action-btn" onclick="deleteItem(${item.id}, '${escAttr(listName)}')" title="Delete">🗑️</button>
+    </div>
+  </li>`;
+}
+
+async function toggleListItem(id, currentDone, listName) {
+  const action = currentDone ? "undone" : "done";
+  const res = await api(`/api/item/${id}/${action}`, { method: "POST" });
+  if (res.ok) {
+    toast(currentDone ? "Restored" : "Done! ✅");
+    openList(listName);
+  }
+}
+
+async function addItemToList(name) {
+  const input = $(".add-item-input");
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = "";
+  const res = await api(`/api/list/${encodeURIComponent(name)}/add`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+
+  if (res.ok) {
+    const d = await res.json();
+    const dueMsg = d.due_date ? ` (due ${d.due_date})` : "";
+    toast(`Added: ${d.text}${dueMsg}`);
+    openList(name);
+  } else {
+    toast("Failed to add");
+  }
+}
+
+function startEdit(itemId, currentText) {
+  const textEl = document.getElementById(`item-text-${itemId}`);
+  if (!textEl) return;
+  const row = document.getElementById(`item-${itemId}`);
+  const actionsEl = row.querySelector(".item-actions");
+  actionsEl.style.display = "none";
+
+  textEl.innerHTML = `<div class="edit-row">
+    <input type="text" class="edit-input" id="edit-input-${itemId}" value="${escAttr(currentText)}"
+           onkeydown="if(event.key==='Enter')saveEdit(${itemId});if(event.key==='Escape')cancelEdit(${itemId},'${escAttr(currentText)}')">
+    <button class="edit-save" onclick="saveEdit(${itemId})">✓</button>
+    <button class="edit-cancel" onclick="cancelEdit(${itemId},'${escAttr(currentText)}')">✕</button>
+  </div>`;
+
+  const editInput = document.getElementById(`edit-input-${itemId}`);
+  editInput.focus();
+  editInput.select();
+}
+
+async function saveEdit(itemId) {
+  const input = document.getElementById(`edit-input-${itemId}`);
+  if (!input) return;
+  const newText = input.value.trim();
+  if (!newText) return;
+
+  const res = await api(`/api/item/${itemId}/edit`, {
+    method: "POST",
+    body: JSON.stringify({ text: newText }),
+  });
+
+  if (res.ok) {
+    toast("Updated ✏️");
+    if (currentList) openList(currentList);
+  } else {
+    toast("Failed to update");
+  }
+}
+
+function cancelEdit(itemId, originalText) {
+  if (currentList) openList(currentList);
+}
+
+async function deleteItem(itemId, listName) {
+  const res = await api(`/api/item/${itemId}`, { method: "DELETE" });
+  if (res.ok) {
+    toast("Deleted 🗑️");
+    openList(listName);
+  } else {
+    toast("Failed to delete");
+  }
+}
+
+function backToLists() {
+  currentList = null;
+  $(".app-header h1").innerHTML = "📋 Lists";
+  loadLists();
+}
+
 // --- Refresh ---
 
 async function refresh() {
   const btn = $(".refresh-btn");
   btn.classList.add("spinning");
-  await loadDashboard();
+  if (currentTab === "today") {
+    await loadDashboard();
+  } else if (currentList) {
+    await openList(currentList);
+  } else {
+    await loadLists();
+  }
   setTimeout(() => btn.classList.remove("spinning"), 600);
 }
 

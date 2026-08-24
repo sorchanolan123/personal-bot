@@ -241,7 +241,7 @@ def capture():
     return jsonify({"ok": True, "result": "; ".join(results) if results else "Processed"})
 
 
-# --- Lists (for quick capture context) ---
+# --- Lists ---
 
 @api.route("/api/lists", methods=["GET"])
 @require_auth
@@ -249,9 +249,68 @@ def lists():
     all_lists = db.get_lists()
     return jsonify([
         {"name": l["name"], "description": l["description"],
-         "pending": l["pending"] or 0}
+         "pending": l["pending"] or 0, "total": l["total"] or 0}
         for l in all_lists
     ])
+
+
+@api.route("/api/list/<name>", methods=["GET"])
+@require_auth
+def list_items(name):
+    if not db.list_exists(name.lower()):
+        return jsonify({"error": "not found"}), 404
+    items = db.get_items(name.lower(), include_done=True)
+    return jsonify([
+        {"id": i["id"], "text": i["text"], "done": bool(i["done"]),
+         "due_date": i["due_date"], "created_at": i["created_at"],
+         "metadata": i["metadata"]}
+        for i in items
+    ])
+
+
+@api.route("/api/list/<name>/add", methods=["POST"])
+@require_auth
+def list_add_item(name):
+    if not db.list_exists(name.lower()):
+        return jsonify({"error": "not found"}), 404
+    data = request.json or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "empty"}), 400
+    from handlers import parse_due_date
+    clean, due = parse_due_date(text)
+    item_id = db.add_item(name.lower(), clean, due_date=due)
+    return jsonify({"ok": True, "id": item_id, "text": clean, "due_date": due})
+
+
+@api.route("/api/item/<int:item_id>/edit", methods=["POST"])
+@require_auth
+def item_edit(item_id):
+    data = request.json or {}
+    new_text = data.get("text", "").strip()
+    if not new_text:
+        return jsonify({"error": "empty"}), 400
+    conn = db.get_db()
+    cursor = conn.execute("UPDATE items SET text = ? WHERE id = ?", (new_text, item_id))
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    if updated:
+        return jsonify({"ok": True})
+    return jsonify({"error": "not found"}), 404
+
+
+@api.route("/api/item/<int:item_id>", methods=["DELETE"])
+@require_auth
+def item_delete(item_id):
+    conn = db.get_db()
+    cursor = conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    if deleted:
+        return jsonify({"ok": True})
+    return jsonify({"error": "not found"}), 404
 
 
 # --- Tracking history (for charts) ---
