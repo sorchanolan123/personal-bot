@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#FDF6F0">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <title>My Brain</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- Login screen -->
+  <div class="screen login-screen" id="login-screen">
+    <div class="login-logo">🧠</div>
+    <div class="login-title">My Brain</div>
+    <div class="login-subtitle">Enter your PIN to continue</div>
+    <input type="password" class="pin-input" maxlength="20" inputmode="numeric" autocomplete="off">
+    <button class="login-btn">Open</button>
+  </div>
+
+  <!-- Main app screen -->
+  <div class="screen app-screen" id="app-screen">
+    <div class="app-header">
+      <h1><span class="greeting">Good morning</span> 🧠</h1>
+      <div class="header-right">
+        <span class="pending-badge">0 pending</span>
+        <button class="refresh-btn" title="Refresh">🔄</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="loading">Loading</div>
+    </div>
+
+    <!-- Quick capture bar -->
+    <div class="capture-bar">
+      <input type="text" class="capture-input" placeholder="What's on your mind?">
+      <button class="capture-send">↑</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

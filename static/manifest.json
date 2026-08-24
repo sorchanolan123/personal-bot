@@ -1,0 +1,21 @@
+{
+  "name": "My Brain",
+  "short_name": "My Brain",
+  "description": "Personal assistant for executive function support",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#FDF6F0",
+  "theme_color": "#FDF6F0",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

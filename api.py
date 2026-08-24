@@ -1,0 +1,267 @@
+"""REST API for the PWA companion app."""
+
+from flask import Blueprint, jsonify, request, session
+from functools import wraps
+import db
+from config import WEB_PIN
+
+api = Blueprint("api", __name__)
+
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("authenticated"):
+            return jsonify({"error": "unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+# --- Auth ---
+
+@api.route("/api/auth", methods=["POST"])
+def auth():
+    pin = (request.json or {}).get("pin", "")
+    if pin == WEB_PIN:
+        session["authenticated"] = True
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "wrong pin"}), 401
+
+
+@api.route("/api/auth/check", methods=["GET"])
+def auth_check():
+    return jsonify({"authenticated": session.get("authenticated", False)})
+
+
+# --- Dashboard data ---
+
+@api.route("/api/today", methods=["GET"])
+@require_auth
+def today():
+    # Focus items (due today + completed today)
+    focus = db.get_focus_today()
+    focus_items = [
+        {"id": i["id"], "text": i["text"], "done": bool(i["done"]),
+         "list_name": i["list_name"], "due_date": i["due_date"]}
+        for i in focus
+    ]
+
+    # Overdue
+    overdue = db.get_overdue()
+    overdue_items = [
+        {"id": i["id"], "text": i["text"], "list_name": i["list_name"],
+         "due_date": i["due_date"]}
+        for i in overdue
+    ]
+
+    # Habits
+    habits_raw = db.get_habits()
+    logged_today = db.get_habits_logged_today()
+    habits = [
+        {"name": h["name"], "done": h["name"] in logged_today,
+         "streak": db.get_habit_streak(h["name"])}
+        for h in habits_raw
+    ]
+
+    # Today's tracking
+    tracking_raw = db.get_tracking_today()
+    tracking = [
+        {"type": t["type"], "value": t["value"], "notes": t["notes"],
+         "created_at": t["created_at"]}
+        for t in tracking_raw
+    ]
+
+    # Check if morning check-in is done (has mood/energy/sleep today)
+    tracked_types = {t["type"] for t in tracking}
+    morning_done = bool(tracked_types & {"mood", "energy", "sleep"})
+
+    # Pending counts
+    all_pending = db.get_all_pending()
+
+    return jsonify({
+        "focus": focus_items,
+        "overdue": overdue_items,
+        "habits": habits,
+        "tracking": tracking,
+        "morning_done": morning_done,
+        "pending_count": len(all_pending),
+    })
+
+
+# --- Morning check-in ---
+
+@api.route("/api/checkin/morning", methods=["POST"])
+@require_auth
+def morning_checkin():
+    data = request.json or {}
+
+    if data.get("mood") is not None:
+        db.add_tracking("mood", float(data["mood"]), data.get("mood_notes"))
+    if data.get("energy") is not None:
+        db.add_tracking("energy", float(data["energy"]))
+    if data.get("sleep") is not None:
+        db.add_tracking("sleep", float(data["sleep"]))
+    if data.get("notes"):
+        db.add_tracking("morning_notes", None, data["notes"])
+
+    # Process intentions as items if provided
+    intentions = data.get("intentions", [])
+    for item_text in intentions:
+        if item_text.strip():
+            from handlers import parse_due_date
+            text, due = parse_due_date(item_text.strip())
+            if not db.list_exists("todo"):
+                db.create_list("todo", "Things to do")
+            db.add_item("todo", text, due_date=due)
+
+    return jsonify({"ok": True})
+
+
+# --- Evening wrap-up ---
+
+@api.route("/api/checkin/evening", methods=["POST"])
+@require_auth
+def evening_checkin():
+    data = request.json or {}
+
+    if data.get("reflection"):
+        db.add_tracking("reflection", None, data["reflection"])
+    if data.get("mood") is not None:
+        db.add_tracking("evening_mood", float(data["mood"]))
+    if data.get("gratitude"):
+        db.add_tracking("gratitude", None, data["gratitude"])
+
+    return jsonify({"ok": True})
+
+
+# --- Habit logging ---
+
+@api.route("/api/habit/<name>/log", methods=["POST"])
+@require_auth
+def log_habit(name):
+    habits = {h["name"] for h in db.get_habits()}
+    if name.lower() not in habits:
+        return jsonify({"error": "not found"}), 404
+    db.log_habit(name.lower())
+    streak = db.get_habit_streak(name.lower())
+    return jsonify({"ok": True, "streak": streak})
+
+
+# --- Item actions ---
+
+@api.route("/api/item/<int:item_id>/done", methods=["POST"])
+@require_auth
+def item_done(item_id):
+    db.mark_done_by_id(item_id)
+    return jsonify({"ok": True})
+
+
+@api.route("/api/item/<int:item_id>/undone", methods=["POST"])
+@require_auth
+def item_undone(item_id):
+    conn = db.get_db()
+    conn.execute(
+        "UPDATE items SET done = 0, completed_at = NULL WHERE id = ?",
+        (item_id,)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# --- Quick capture ---
+
+@api.route("/api/capture", methods=["POST"])
+@require_auth
+def capture():
+    data = request.json or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "empty"}), 400
+
+    # Try LLM parsing first
+    try:
+        from llm import parse_freeform
+        lists = db.get_lists()
+        list_names = [l["name"] for l in lists]
+        if "inbox" not in list_names:
+            db.create_list("inbox", "Catch-all for unsorted items")
+        actions = parse_freeform(text, list_names)
+    except Exception:
+        actions = None
+
+    if not actions:
+        # Fallback: add to inbox with date parsing
+        from handlers import parse_due_date
+        clean, due = parse_due_date(text)
+        if not db.list_exists("inbox"):
+            db.create_list("inbox", "Catch-all for unsorted items")
+        db.add_item("inbox", clean, due_date=due)
+        return jsonify({"ok": True, "result": f"Added to inbox: {clean}"})
+
+    # Process LLM actions
+    import re
+    results = []
+    for action in actions:
+        a_type = action.get("action")
+        if a_type == "list_item":
+            list_name = action.get("list", "inbox").lower()
+            item_text = action.get("text", "")
+            due = action.get("due_date")
+            if not db.list_exists(list_name):
+                if re.match(r"^[a-z][a-z0-9_]{0,29}$", list_name):
+                    db.create_list(list_name)
+                else:
+                    list_name = "inbox"
+            db.add_item(list_name, item_text, due_date=due)
+            results.append(f"Added to {list_name}: {item_text}")
+        elif a_type == "tracking":
+            type_ = action.get("type", "custom")
+            value = action.get("value")
+            notes = action.get("notes", "")
+            db.add_tracking(type_, value, notes)
+            results.append(f"Tracked {type_}")
+        elif a_type == "mark_done":
+            list_name = action.get("list", "").lower()
+            search_text = action.get("text", "")
+            if list_name and db.list_exists(list_name) and search_text:
+                pos, item = db.find_item_by_text(list_name, search_text)
+                if pos:
+                    db.mark_done(list_name, pos)
+                    results.append(f"Done: {item['text']}")
+        elif a_type == "remove_item":
+            list_name = action.get("list", "").lower()
+            search_text = action.get("text", "")
+            if list_name and db.list_exists(list_name) and search_text:
+                pos, item = db.find_item_by_text(list_name, search_text)
+                if pos:
+                    db.delete_item(list_name, pos)
+                    results.append(f"Removed: {item['text']}")
+
+    return jsonify({"ok": True, "result": "; ".join(results) if results else "Processed"})
+
+
+# --- Lists (for quick capture context) ---
+
+@api.route("/api/lists", methods=["GET"])
+@require_auth
+def lists():
+    all_lists = db.get_lists()
+    return jsonify([
+        {"name": l["name"], "description": l["description"],
+         "pending": l["pending"] or 0}
+        for l in all_lists
+    ])
+
+
+# --- Tracking history (for charts) ---
+
+@api.route("/api/tracking/<type_>", methods=["GET"])
+@require_auth
+def tracking_history(type_):
+    days = request.args.get("days", 30, type=int)
+    rows = db.get_tracking_by_type(type_, days=days)
+    return jsonify([
+        {"value": r["value"], "notes": r["notes"], "date": r["created_at"][:10]}
+        for r in rows
+    ])

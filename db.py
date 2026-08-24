@@ -409,6 +409,18 @@ def get_tracking_since(days=7):
     return rows
 
 
+def get_tracking_today():
+    """Get all tracking entries from today."""
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT * FROM tracking WHERE date(created_at) = ? ORDER BY created_at DESC",
+        (today,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def get_tracking_by_type(type_, days=30):
     conn = get_db()
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")

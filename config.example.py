@@ -20,6 +20,14 @@ CRON_SECRET = os.environ.get("CRON_SECRET", "CHANGE_ME_TO_A_RANDOM_STRING")
 # Get one at: https://console.anthropic.com/settings/keys
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_KEY_HERE")
 
+# Web app PIN (for the PWA companion app)
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(6))"
+WEB_PIN = os.environ.get("WEB_PIN", "CHANGE_ME")
+
+# Flask secret key (for session cookies)
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
+SECRET_KEY = os.environ.get("SECRET_KEY", "CHANGE_ME_TO_A_RANDOM_STRING")
+
 # Database path
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.db")
 

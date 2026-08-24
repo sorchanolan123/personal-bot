@@ -1,14 +1,17 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import hmac
 import os
 import random
 import db
-from config import CRON_SECRET, CHAT_ID
+from config import CRON_SECRET, CHAT_ID, SECRET_KEY
 from telegram import parse_update, send_message, send_document, make_keyboard
 from handlers import handle_message, handle_callback, handle_evening
 from morning import build_briefing
+from api import api
 
 app = Flask(__name__)
+app.secret_key = SECRET_KEY
+app.register_blueprint(api)
 db.init_db()
 
 
@@ -308,6 +311,24 @@ def trigger_healthcheck():
 @app.route("/", methods=["GET"])
 def health():
     return "Bot is running."
+
+
+# --- PWA companion app ---
+
+@app.route("/app")
+@app.route("/app/")
+def pwa():
+    return send_from_directory("static", "index.html")
+
+
+@app.route("/manifest.json")
+def manifest():
+    return send_from_directory("static", "manifest.json")
+
+
+@app.route("/sw.js")
+def service_worker():
+    return send_from_directory("static", "sw.js")
 
 
 if __name__ == "__main__":
