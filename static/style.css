@@ -124,7 +124,7 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* === Content area === */
-.content { padding: 0 16px; }
+.content { padding: 0 16px; padding-bottom: 70px; }
 
 /* === Cards === */
 .card {
@@ -380,18 +380,11 @@ textarea { min-height: 72px; }
 .tab-icon { font-size: 20px; }
 .tab-label { letter-spacing: 0.3px; }
 
-/* === Quick capture === */
-.capture-bar {
-  position: fixed;
-  bottom: 50px;
-  left: 0;
-  right: 0;
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  padding: 10px 16px;
+/* === Quick capture (inline) === */
+.capture-bar-inline {
   display: flex;
   gap: 8px;
-  z-index: 20;
+  margin-bottom: 14px;
 }
 .capture-input {
   flex: 1;
@@ -401,11 +394,66 @@ textarea { min-height: 72px; }
   font-size: 14px;
   font-family: inherit;
   color: var(--text);
-  background: var(--bg);
+  background: var(--card);
   outline: none;
 }
 .capture-input:focus { border-color: var(--primary-light); }
 .capture-input::placeholder { color: var(--text-muted); }
+
+/* Chat bubble */
+.chat-bubble {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+}
+.chat-q {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-style: italic;
+}
+.chat-a {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.chat-a.thinking {
+  color: var(--text-muted);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+/* Section label inside tasks card */
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+/* Add todo inline */
+.add-todo-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.add-todo-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+}
+.add-todo-input:focus { border-color: var(--primary-light); }
+.add-todo-input::placeholder { color: var(--text-muted); }
 
 .capture-send {
   width: 42px;
@@ -757,7 +805,6 @@ textarea { min-height: 72px; }
 /* === Responsive === */
 @media (min-width: 480px) {
   .content { max-width: 440px; margin: 0 auto; }
-  .capture-bar { max-width: 440px; left: 50%; transform: translateX(-50%); }
   .tab-bar { max-width: 440px; left: 50%; transform: translateX(-50%); }
-  .toast { bottom: 130px; }
+  .toast { bottom: 80px; }
 }

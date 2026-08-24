@@ -241,6 +241,74 @@ def capture():
     return jsonify({"ok": True, "result": "; ".join(results) if results else "Processed"})
 
 
+# --- Chat (question answering) ---
+
+@api.route("/api/chat", methods=["POST"])
+@require_auth
+def chat():
+    """Answer a question using LLM with context from the user's data."""
+    data = request.json or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "empty"}), 400
+
+    try:
+        from llm import call_haiku
+        import json
+
+        # Gather context from the user's data
+        context_parts = []
+
+        # Lists and their items
+        all_lists = db.get_lists()
+        for lst in all_lists:
+            items = db.get_items(lst["name"], include_done=False)
+            if items:
+                item_texts = [i["text"] for i in items[:20]]
+                context_parts.append(f"List '{lst['name']}': {', '.join(item_texts)}")
+
+        # Today's focus
+        focus = db.get_focus_today()
+        if focus:
+            done = [f["text"] for f in focus if f["done"]]
+            pending = [f["text"] for f in focus if not f["done"]]
+            if pending:
+                context_parts.append(f"Today's pending tasks: {', '.join(pending)}")
+            if done:
+                context_parts.append(f"Today's completed tasks: {', '.join(done)}")
+
+        # Habits
+        habits = db.get_habits()
+        logged = db.get_habits_logged_today()
+        if habits:
+            habit_status = [f"{h['name']} ({'done' if h['name'] in logged else 'not done'})" for h in habits]
+            context_parts.append(f"Habits: {', '.join(habit_status)}")
+
+        # Recent tracking
+        tracking = db.get_tracking_today()
+        if tracking:
+            track_summary = [f"{t['type']}: {t['value']}" for t in tracking if t["value"] is not None]
+            if track_summary:
+                context_parts.append(f"Today's tracking: {', '.join(track_summary)}")
+
+        context = "\n".join(context_parts) if context_parts else "No data yet."
+
+        system = f"""You are a friendly personal assistant embedded in a life management app.
+The user is asking you a question. Use their data to give helpful, personalised answers.
+Keep responses concise (2-3 sentences max). Be warm and supportive.
+
+User's current data:
+{context}"""
+
+        reply = call_haiku(system, text)
+        if reply:
+            return jsonify({"ok": True, "reply": reply})
+        return jsonify({"ok": False, "reply": "Hmm, I couldn't think of an answer. Try again?"}), 500
+
+    except Exception as e:
+        return jsonify({"ok": False, "reply": f"Something went wrong: {str(e)}"}), 500
+
+
 # --- Lists ---
 
 @api.route("/api/lists", methods=["GET"])

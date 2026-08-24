@@ -110,32 +110,15 @@ function renderDashboard() {
 
   let html = "";
 
+  // Capture bar at the top
+  html += `<div class="capture-bar-inline">
+    <input type="text" class="capture-input" placeholder="What's on your mind?" autocomplete="off">
+    <button class="capture-send" onclick="sendCapture()">↑</button>
+  </div>
+  <div class="chat-bubble" style="display:none"></div>`;
+
   // Morning check-in card
   html += renderMorningCard(data.morning_done);
-
-  // Overdue items
-  if (data.overdue.length > 0) {
-    html += `<div class="card" style="border-left: 3px solid #D46B6B">
-      <div class="card-header">
-        <span class="emoji">🔴</span> Overdue
-        <span class="count">${data.overdue.length}</span>
-      </div>
-      <ul class="item-list">${data.overdue.map(renderItem).join("")}</ul>
-    </div>`;
-  }
-
-  // Today's focus
-  html += `<div class="card">
-    <div class="card-header">
-      <span class="emoji">🎯</span> Today
-      <span class="count">${data.focus.filter(i => !i.done).length} left</span>
-    </div>`;
-  if (data.focus.length > 0) {
-    html += `<ul class="item-list">${data.focus.map(renderItem).join("")}</ul>`;
-  } else {
-    html += `<div class="empty">Nothing due today</div>`;
-  }
-  html += `</div>`;
 
   // Unlogged habits (compact — full view is in Track tab)
   const unlogged = data.habits.filter(h => !h.done);
@@ -175,8 +158,79 @@ function renderDashboard() {
     html += renderEveningCard();
   }
 
+  // Collapsible tasks section at the bottom
+  const pendingFocus = data.focus.filter(i => !i.done).length;
+  const totalTasks = data.focus.length + data.overdue.length;
+  const taskLabel = data.overdue.length > 0
+    ? `Tasks (${pendingFocus} today, ${data.overdue.length} overdue)`
+    : `Tasks (${pendingFocus} pending)`;
+
+  html += `<div class="card checkin-card" id="tasks-card">
+    <div class="checkin-toggle" onclick="toggleCheckin('tasks-card')">
+      <div class="card-header" style="margin-bottom:0">
+        <span class="emoji">🎯</span> ${taskLabel}
+      </div>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="checkin-body">
+      <div style="padding-top:14px">`;
+
+  // Overdue items
+  if (data.overdue.length > 0) {
+    html += `<div style="margin-bottom:12px">
+      <div class="section-label" style="color:#D46B6B">Overdue</div>
+      <ul class="item-list">${data.overdue.map(renderItem).join("")}</ul>
+    </div>`;
+  }
+
+  // Today's focus
+  if (data.focus.length > 0) {
+    html += `<div style="margin-bottom:12px">
+      <div class="section-label">Due today</div>
+      <ul class="item-list">${data.focus.map(renderItem).join("")}</ul>
+    </div>`;
+  } else if (data.overdue.length === 0) {
+    html += `<div class="empty">Nothing due today</div>`;
+  }
+
+  // Add todo inline
+  html += `<div class="add-todo-row">
+    <input type="text" class="add-todo-input" placeholder="Add a task..." autocomplete="off"
+           onkeydown="if(event.key==='Enter')addTodoInline(this)">
+    <button class="capture-send" onclick="addTodoInline(this.previousElementSibling)">+</button>
+  </div>`;
+
+  html += `</div></div></div>`;
+
   content.innerHTML = html;
+  bindCaptureInput();
   bindCardEvents();
+}
+
+function bindCaptureInput() {
+  const input = $(".capture-input");
+  if (input) {
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") sendCapture();
+    });
+  }
+}
+
+async function addTodoInline(input) {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+
+  const res = await api("/api/list/todo/add", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+  if (res.ok) {
+    toast("Added ✓");
+    loadDashboard();
+  } else {
+    toast("Failed to add");
+  }
 }
 
 // --- Morning check-in ---
@@ -379,7 +433,16 @@ async function logHabit(name) {
   }
 }
 
-// --- Quick capture ---
+// --- Quick capture / chat ---
+
+function isQuestion(text) {
+  const t = text.trim().toLowerCase();
+  if (t.endsWith("?")) return true;
+  const starters = ["what ", "when ", "where ", "who ", "why ", "how ", "which ",
+    "should ", "could ", "can ", "do ", "does ", "is ", "are ", "will ",
+    "tell me", "suggest", "recommend", "help me"];
+  return starters.some(s => t.startsWith(s));
+}
 
 async function sendCapture() {
   const input = $(".capture-input");
@@ -391,21 +454,51 @@ async function sendCapture() {
   btn.disabled = true;
 
   try {
-    const res = await api("/api/capture", {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    });
-    if (res.ok) {
+    if (isQuestion(text)) {
+      // Chat mode — show thinking indicator
+      showChatBubble("thinking", text);
+      const res = await api("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
       const d = await res.json();
-      toast(d.result || "Captured ✓");
-      loadDashboard();
+      showChatBubble("reply", d.reply || "No response");
     } else {
-      toast("Failed to capture");
+      // Action mode — capture as before
+      const res = await api("/api/capture", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        toast(d.result || "Captured ✓");
+        if (currentTab === "today") loadDashboard();
+      } else {
+        toast("Failed to capture");
+      }
     }
   } catch {
     toast("Network error");
   } finally {
     btn.disabled = false;
+  }
+}
+
+function showChatBubble(type, text) {
+  const bubble = $(".chat-bubble");
+  if (!bubble) return;
+
+  if (type === "thinking") {
+    bubble.innerHTML = `<div class="chat-q">${escHtml(text)}</div><div class="chat-a thinking">Thinking...</div>`;
+    bubble.style.display = "block";
+  } else if (type === "reply") {
+    const existing = bubble.querySelector(".chat-a");
+    if (existing) {
+      existing.classList.remove("thinking");
+      existing.textContent = text;
+    }
+    // Auto-dismiss after 10 seconds
+    setTimeout(() => { bubble.style.display = "none"; }, 10000);
   }
 }
 
@@ -892,12 +985,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Enter") doLogin();
   });
   $(".login-btn").addEventListener("click", doLogin);
-
-  // Capture bar
-  $(".capture-input").addEventListener("keydown", e => {
-    if (e.key === "Enter") sendCapture();
-  });
-  $(".capture-send").addEventListener("click", sendCapture);
 
   // Start
   checkAuth();
