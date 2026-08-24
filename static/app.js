@@ -667,10 +667,17 @@ async function loadTrack() {
   try {
     const res = await api("/api/tracking/overview");
     if (res.status === 401) { show("#login-screen"); return; }
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Track API error:", res.status, errText);
+      content.innerHTML = `<div class="empty">Error loading tracking (${res.status})</div>`;
+      return;
+    }
     trackData = await res.json();
     renderTrack();
-  } catch {
-    content.innerHTML = '<div class="empty">Could not load tracking data.</div>';
+  } catch (err) {
+    console.error("Track load error:", err);
+    content.innerHTML = `<div class="empty">Could not load tracking data: ${err.message}</div>`;
   }
 }
 
