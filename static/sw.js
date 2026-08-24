@@ -1,9 +1,8 @@
-const CACHE = "brain-v1";
+const CACHE = "brain-v2";
 const SHELL = [
   "/app",
   "/static/style.css",
   "/static/app.js",
-  "/static/icon-192.png",
 ];
 
 self.addEventListener("install", e => {
@@ -23,14 +22,20 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
 
-  // API requests: always go to network
-  if (url.pathname.startsWith("/api/")) {
+  // API requests: always network
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/trigger/")) {
     e.respondWith(fetch(e.request));
     return;
   }
 
-  // Shell files: cache first, fallback to network
+  // Shell files: network first, fall back to cache (so updates always come through)
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    fetch(e.request)
+      .then(res => {
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
