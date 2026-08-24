@@ -1,18 +1,16 @@
 /* === My Brain — PWA companion app === */
 
-const API = "";  // same origin
-let data = null;
+let todayData = null;
 let currentTab = "today";
-let currentList = null;  // when viewing a specific list
+let currentList = null;
 
 // --- Helpers ---
 
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
+function api(path, opts = {}) {
+  return fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
-  return res;
 }
 
 function $(sel) { return document.querySelector(sel); }
@@ -93,7 +91,7 @@ async function loadDashboard() {
   try {
     const res = await api("/api/today");
     if (res.status === 401) { show("#login-screen"); return; }
-    data = await res.json();
+    todayData = await res.json();
     renderDashboard();
   } catch (e) {
     content.innerHTML = '<div class="empty">Could not load data. Pull down to retry.</div>';
@@ -106,7 +104,7 @@ function renderDashboard() {
 
   // Update header
   $(".greeting").textContent = greeting();
-  $(".pending-badge").textContent = `${data.pending_count} pending`;
+  $(".pending-badge").textContent = `${todayData.pending_count} pending`;
 
   let html = "";
 
@@ -118,10 +116,10 @@ function renderDashboard() {
   <div class="chat-bubble" style="display:none"></div>`;
 
   // Morning check-in card
-  html += renderMorningCard(data.morning_done);
+  html += renderMorningCard(todayData.morning_done);
 
   // Unlogged habits (compact — full view is in Track tab)
-  const unlogged = data.habits.filter(h => !h.done);
+  const unlogged = todayData.habits.filter(h => !h.done);
   if (unlogged.length > 0) {
     html += `<div class="card">
       <div class="card-header">
@@ -133,8 +131,8 @@ function renderDashboard() {
   }
 
   // Today's tracking summary
-  if (data.tracking.length > 0) {
-    const nonMeta = data.tracking.filter(t =>
+  if (todayData.tracking.length > 0) {
+    const nonMeta = todayData.tracking.filter(t =>
       !["morning_notes", "reflection", "gratitude"].includes(t.type)
     );
     if (nonMeta.length > 0) {
@@ -159,10 +157,9 @@ function renderDashboard() {
   }
 
   // Collapsible tasks section at the bottom
-  const pendingFocus = data.focus.filter(i => !i.done).length;
-  const totalTasks = data.focus.length + data.overdue.length;
-  const taskLabel = data.overdue.length > 0
-    ? `Tasks (${pendingFocus} today, ${data.overdue.length} overdue)`
+  const pendingFocus = todayData.focus.filter(i => !i.done).length;
+  const taskLabel = todayData.overdue.length > 0
+    ? `Tasks (${pendingFocus} today, ${todayData.overdue.length} overdue)`
     : `Tasks (${pendingFocus} pending)`;
 
   html += `<div class="card checkin-card" id="tasks-card">
@@ -176,20 +173,20 @@ function renderDashboard() {
       <div style="padding-top:14px">`;
 
   // Overdue items
-  if (data.overdue.length > 0) {
+  if (todayData.overdue.length > 0) {
     html += `<div style="margin-bottom:12px">
       <div class="section-label" style="color:#D46B6B">Overdue</div>
-      <ul class="item-list">${data.overdue.map(renderItem).join("")}</ul>
+      <ul class="item-list">${todayData.overdue.map(renderItem).join("")}</ul>
     </div>`;
   }
 
   // Today's focus
-  if (data.focus.length > 0) {
+  if (todayData.focus.length > 0) {
     html += `<div style="margin-bottom:12px">
       <div class="section-label">Due today</div>
-      <ul class="item-list">${data.focus.map(renderItem).join("")}</ul>
+      <ul class="item-list">${todayData.focus.map(renderItem).join("")}</ul>
     </div>`;
-  } else if (data.overdue.length === 0) {
+  } else if (todayData.overdue.length === 0) {
     html += `<div class="empty">Nothing due today</div>`;
   }
 
@@ -197,14 +194,13 @@ function renderDashboard() {
   html += `<div class="add-todo-row">
     <input type="text" class="add-todo-input" placeholder="Add a task..." autocomplete="off"
            onkeydown="if(event.key==='Enter')addTodoInline(this)">
-    <button class="capture-send" onclick="addTodoInline(this.previousElementSibling)">+</button>
+    <button class="add-todo-btn" onclick="addTodoInline(this.previousElementSibling)">+</button>
   </div>`;
 
   html += `</div></div></div>`;
 
   content.innerHTML = html;
   bindCaptureInput();
-  bindCardEvents();
 }
 
 function bindCaptureInput() {
@@ -311,16 +307,16 @@ async function submitMorning() {
 // --- Evening wrap-up ---
 
 function renderEveningCard() {
-  const hasReflection = data.tracking.some(t => t.type === "reflection");
+  const hasReflection = todayData.tracking.some(t => t.type === "reflection");
   const openClass = hasReflection ? "done-card" : "";
   const icon = hasReflection ? "✅" : "🌙";
   const label = hasReflection ? "Evening wrap-up done" : "Evening wrap-up";
 
   // Summary of the day
-  const doneCount = data.focus.filter(i => i.done).length;
-  const totalFocus = data.focus.length;
-  const habitsLogged = data.habits.filter(h => h.done).length;
-  const totalHabits = data.habits.length;
+  const doneCount = todayData.focus.filter(i => i.done).length;
+  const totalFocus = todayData.focus.length;
+  const habitsLogged = todayData.habits.filter(h => h.done).length;
+  const totalHabits = todayData.habits.length;
 
   return `<div class="card checkin-card ${openClass}" id="evening-card">
     <div class="checkin-toggle" onclick="toggleCheckin('evening-card')">
@@ -507,10 +503,6 @@ function showChatBubble(type, text) {
 function toggleCheckin(id) {
   const card = document.getElementById(id);
   card.classList.toggle("open");
-}
-
-function bindCardEvents() {
-  // Nothing extra needed — events are inline for simplicity
 }
 
 function escHtml(s) {

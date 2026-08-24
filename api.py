@@ -470,8 +470,7 @@ def tracking_overview():
             "trackers": trackers,
         })
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 # --- Create habit ---

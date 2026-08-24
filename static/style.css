@@ -86,7 +86,7 @@ body {
 }
 
 /* === Main app === */
-.app-screen { padding: 0 0 130px; }
+.app-screen { padding: 0 0 60px; }
 
 .app-header {
   position: sticky;
@@ -124,7 +124,7 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* === Content area === */
-.content { padding: 0 16px; padding-bottom: 70px; }
+.content { padding: 0 16px 70px; }
 
 /* === Cards === */
 .card {
@@ -454,6 +454,21 @@ textarea { min-height: 72px; }
 }
 .add-todo-input:focus { border-color: var(--primary-light); }
 .add-todo-input::placeholder { color: var(--text-muted); }
+.add-todo-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.add-todo-btn:active { background: #A85E3D; }
 
 .capture-send {
   width: 42px;
@@ -519,16 +534,6 @@ textarea { min-height: 72px; }
   animation: spin 0.6s linear infinite;
   margin-left: 8px;
   vertical-align: middle;
-}
-
-/* === Section label === */
-.section-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--text-muted);
-  margin: 20px 0 8px;
-  padding: 0 4px;
 }
 
 /* === Tracking pills === */
