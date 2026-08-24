@@ -88,6 +88,158 @@ def today():
     })
 
 
+# --- Smart feed ---
+
+@api.route("/api/feed", methods=["GET"])
+@require_auth
+def feed():
+    """Single prioritised feed for the Today tab."""
+    from datetime import datetime
+
+    now = datetime.now()
+    hour = now.hour
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Gather raw data
+    overdue = db.get_overdue()
+    due_today = db.get_due_today()
+    focus = db.get_focus_today()
+    upcoming = db.get_upcoming(days=7)
+    habits_raw = db.get_habits()
+    logged_today = db.get_habits_logged_today()
+    tracking_raw = db.get_tracking_today()
+    all_pending = db.get_all_pending()
+
+    # Check-in status
+    tracked_types = {t["type"] for t in tracking_raw}
+    morning_done = bool(tracked_types & {"mood", "energy", "sleep"})
+    evening_done = "reflection" in tracked_types
+
+    # Quick-tap values (mood/energy/sleep)
+    quick_taps = {}
+    for t in tracking_raw:
+        if t["type"] in ("mood", "energy", "sleep") and t["value"] is not None:
+            quick_taps[t["type"]] = t["value"]
+
+    # Build feed items — each has: type, priority (lower = more urgent), data
+    items = []
+
+    # Overdue items (highest priority)
+    for i in overdue:
+        days_over = (now.date() - datetime.strptime(i["due_date"], "%Y-%m-%d").date()).days
+        items.append({
+            "type": "task",
+            "priority": 0,
+            "id": i["id"],
+            "text": i["text"],
+            "list_name": i["list_name"],
+            "due_date": i["due_date"],
+            "urgency": "overdue",
+            "detail": f"overdue {days_over} day{'s' if days_over != 1 else ''}",
+            "done": False,
+        })
+
+    # Due today (high priority)
+    for i in due_today:
+        items.append({
+            "type": "task",
+            "priority": 1,
+            "id": i["id"],
+            "text": i["text"],
+            "list_name": i["list_name"],
+            "due_date": i["due_date"],
+            "urgency": "today",
+            "detail": "due today",
+            "done": False,
+        })
+
+    # Completed today (show as done)
+    done_today = [i for i in focus if i["done"]]
+    for i in done_today:
+        items.append({
+            "type": "task",
+            "priority": 10,
+            "id": i["id"],
+            "text": i["text"],
+            "list_name": i["list_name"],
+            "due_date": i["due_date"],
+            "urgency": "done",
+            "detail": "done today",
+            "done": True,
+        })
+
+    # Morning check-in nudge
+    if not morning_done:
+        items.append({
+            "type": "checkin",
+            "priority": 2,
+            "checkin_type": "morning",
+            "text": "Check in for today",
+            "detail": "Log mood, energy, sleep",
+        })
+
+    # Unlogged habits
+    unlogged = [h for h in habits_raw if h["name"] not in logged_today]
+    if unlogged:
+        items.append({
+            "type": "habits",
+            "priority": 3,
+            "habits": [{"name": h["name"], "streak": db.get_habit_streak(h["name"])} for h in unlogged],
+            "text": f"{len(unlogged)} habit{'s' if len(unlogged) != 1 else ''} to log",
+            "detail": ", ".join(h["name"] for h in unlogged[:4]),
+        })
+
+    # Evening wrap-up (after 5pm)
+    if hour >= 17 and not evening_done:
+        done_count = len(done_today)
+        total_focus = len(due_today) + len(done_today)
+        habits_logged = len(logged_today)
+        total_habits = len(habits_raw)
+        items.append({
+            "type": "checkin",
+            "priority": 4,
+            "checkin_type": "evening",
+            "text": "Evening wrap-up",
+            "detail": f"{done_count}/{total_focus} tasks, {habits_logged}/{total_habits} habits",
+        })
+
+    # Upcoming items (lower priority, "later" section)
+    later = []
+    for i in upcoming:
+        later.append({
+            "type": "task",
+            "id": i["id"],
+            "text": i["text"],
+            "list_name": i["list_name"],
+            "due_date": i["due_date"],
+            "detail": i["due_date"],
+            "done": False,
+        })
+
+    return jsonify({
+        "quick_taps": quick_taps,
+        "morning_done": morning_done,
+        "items": sorted(items, key=lambda x: x.get("priority", 99)),
+        "later": later,
+        "pending_count": len(all_pending),
+    })
+
+
+# --- Quick tap (single value log) ---
+
+@api.route("/api/quicktap", methods=["POST"])
+@require_auth
+def quicktap():
+    """Log a single tracking value (mood, energy, sleep)."""
+    data = request.json or {}
+    type_ = data.get("type", "").strip().lower()
+    value = data.get("value")
+    if type_ not in ("mood", "energy", "sleep") or value is None:
+        return jsonify({"error": "invalid"}), 400
+    db.add_tracking(type_, float(value))
+    return jsonify({"ok": True, "type": type_, "value": float(value)})
+
+
 # --- Morning check-in ---
 
 @api.route("/api/checkin/morning", methods=["POST"])

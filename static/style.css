@@ -807,6 +807,150 @@ textarea { min-height: 72px; }
 }
 .type-btn:active { background: var(--primary-faint); }
 
+/* === Quick-tap pills === */
+.quick-taps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.qt-pill {
+  flex: 1;
+  padding: 8px 4px;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  background: var(--card);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.qt-pill:active { background: var(--primary-faint); }
+.qt-filled {
+  border-color: var(--primary-light);
+  background: var(--primary-faint);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* === Feed rows === */
+.feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  transition: opacity 0.15s;
+}
+.feed-row-overdue { border-left: 3px solid #D46B6B; }
+.feed-row-done { opacity: 0.5; }
+.feed-row-later { opacity: 0.55; }
+.feed-row-nudge {
+  border-left: 3px solid var(--primary-light);
+  cursor: pointer;
+}
+.feed-row-nudge:active { background: var(--primary-faint); }
+.feed-row-habits {
+  border-left: 3px solid var(--accent-green);
+}
+
+.feed-main { flex: 1; min-width: 0; }
+.feed-text { font-size: 14px; line-height: 1.4; }
+.feed-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.feed-nudge-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.feed-nudge-arrow {
+  color: var(--text-muted);
+  font-size: 18px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.feed-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin: 14px 0 6px 4px;
+}
+
+.feed-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+.feed-empty-icon { font-size: 28px; margin-bottom: 8px; }
+
+/* Feed habit buttons */
+.feed-habit-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.feed-habit-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1.5px solid var(--accent-green-light);
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.feed-habit-btn:active {
+  background: var(--accent-green-light);
+  color: #4A7A4E;
+}
+
+/* === Checkin sheet === */
+.checkin-sheet {
+  background: var(--card);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  box-shadow: 0 2px 12px var(--shadow);
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+}
+.checkin-sheet.open {
+  max-height: 700px;
+  opacity: 1;
+}
+.sheet-content { padding: 20px; }
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 16px;
+}
+.sheet-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.sheet-close:active { background: var(--border); }
+
 /* === Responsive === */
 @media (min-width: 480px) {
   .content { max-width: 440px; margin: 0 auto; }

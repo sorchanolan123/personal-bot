@@ -360,6 +360,20 @@ def get_due_tomorrow():
     return items
 
 
+def get_upcoming(days=7):
+    """Pending items due in the next N days (excluding today)."""
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    end = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+    items = conn.execute(
+        "SELECT * FROM items WHERE due_date > ? AND due_date <= ? AND done = 0 "
+        "ORDER BY due_date, created_at",
+        (today, end)
+    ).fetchall()
+    conn.close()
+    return items
+
+
 def get_focus_today():
     """Get today's focus: items due today (pending) + items completed today."""
     conn = get_db()

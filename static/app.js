@@ -82,14 +82,14 @@ async function doLogin() {
   }
 }
 
-// --- Dashboard ---
+// --- Dashboard (unified feed) ---
 
 async function loadDashboard() {
   const content = $(".content");
   content.innerHTML = '<div class="loading">Loading</div>';
 
   try {
-    const res = await api("/api/today");
+    const res = await api("/api/feed");
     if (res.status === 401) { show("#login-screen"); return; }
     todayData = await res.json();
     renderDashboard();
@@ -100,7 +100,6 @@ async function loadDashboard() {
 
 function renderDashboard() {
   const content = $(".content");
-  const tod = timeOfDay();
 
   // Update header
   $(".greeting").textContent = greeting();
@@ -108,99 +107,223 @@ function renderDashboard() {
 
   let html = "";
 
-  // Capture bar at the top
+  // Capture bar
   html += `<div class="capture-bar-inline">
     <input type="text" class="capture-input" placeholder="What's on your mind?" autocomplete="off">
     <button class="capture-send" onclick="sendCapture()">↑</button>
   </div>
   <div class="chat-bubble" style="display:none"></div>`;
 
-  // Morning check-in card
-  html += renderMorningCard(todayData.morning_done);
+  // Quick-tap pills (mood / energy / sleep — tap to set)
+  html += renderQuickTaps(todayData.quick_taps);
 
-  // Unlogged habits (compact — full view is in Track tab)
-  const unlogged = todayData.habits.filter(h => !h.done);
-  if (unlogged.length > 0) {
-    html += `<div class="card">
-      <div class="card-header">
-        <span class="emoji">🔄</span> Habits to log
-        <span class="count">${unlogged.length} left</span>
-      </div>
-      ${unlogged.map(renderHabit).join("")}
+  // Feed items
+  const items = todayData.items || [];
+  const actionItems = items.filter(i => i.urgency !== "done");
+  const doneItems = items.filter(i => i.urgency === "done");
+
+  if (actionItems.length === 0 && doneItems.length === 0) {
+    html += `<div class="feed-empty">
+      <div class="feed-empty-icon">✨</div>
+      <div>All clear for today</div>
     </div>`;
   }
 
-  // Today's tracking summary
-  if (todayData.tracking.length > 0) {
-    const nonMeta = todayData.tracking.filter(t =>
-      !["morning_notes", "reflection", "gratitude"].includes(t.type)
-    );
-    if (nonMeta.length > 0) {
-      html += `<div class="card">
-        <div class="card-header">
-          <span class="emoji">📊</span> Logged today
-        </div>
-        <div class="tracking-pills">
-          ${nonMeta.map(t => `
-            <span class="tracking-pill">
-              ${t.type}${t.value !== null ? `: <span class="pill-value">${t.value}</span>` : ""}
-            </span>
-          `).join("")}
-        </div>
-      </div>`;
+  for (const item of actionItems) {
+    html += renderFeedItem(item);
+  }
+
+  // Completed today (dimmed)
+  if (doneItems.length > 0) {
+    html += `<div class="feed-section-label">Done today</div>`;
+    for (const item of doneItems) {
+      html += renderFeedItem(item);
     }
   }
 
-  // Evening wrap-up card (show after 5pm)
-  if (tod === "evening") {
-    html += renderEveningCard();
+  // Later section (upcoming items, dimmed)
+  const later = todayData.later || [];
+  if (later.length > 0) {
+    html += `<div class="feed-section-label">Coming up</div>`;
+    for (const item of later) {
+      html += renderFeedItem({ ...item, urgency: "later" });
+    }
   }
 
-  // Collapsible tasks section at the bottom
-  const pendingFocus = todayData.focus.filter(i => !i.done).length;
-  const taskLabel = todayData.overdue.length > 0
-    ? `Tasks (${pendingFocus} today, ${todayData.overdue.length} overdue)`
-    : `Tasks (${pendingFocus} pending)`;
-
-  html += `<div class="card checkin-card" id="tasks-card">
-    <div class="checkin-toggle" onclick="toggleCheckin('tasks-card')">
-      <div class="card-header" style="margin-bottom:0">
-        <span class="emoji">🎯</span> ${taskLabel}
-      </div>
-      <span class="chevron">▼</span>
-    </div>
-    <div class="checkin-body">
-      <div style="padding-top:14px">`;
-
-  // Overdue items
-  if (todayData.overdue.length > 0) {
-    html += `<div style="margin-bottom:12px">
-      <div class="section-label" style="color:#D46B6B">Overdue</div>
-      <ul class="item-list">${todayData.overdue.map(renderItem).join("")}</ul>
-    </div>`;
-  }
-
-  // Today's focus
-  if (todayData.focus.length > 0) {
-    html += `<div style="margin-bottom:12px">
-      <div class="section-label">Due today</div>
-      <ul class="item-list">${todayData.focus.map(renderItem).join("")}</ul>
-    </div>`;
-  } else if (todayData.overdue.length === 0) {
-    html += `<div class="empty">Nothing due today</div>`;
-  }
-
-  // Add todo inline
-  html += `<div class="add-todo-row">
+  // Add todo at bottom
+  html += `<div class="add-todo-row" style="margin-top:16px">
     <input type="text" class="add-todo-input" placeholder="Add a task..." autocomplete="off"
            onkeydown="if(event.key==='Enter')addTodoInline(this)">
     <button class="add-todo-btn" onclick="addTodoInline(this.previousElementSibling)">+</button>
   </div>`;
 
-  html += `</div></div></div>`;
-
   content.innerHTML = html;
   bindCaptureInput();
+}
+
+// --- Quick-tap pills ---
+
+function renderQuickTaps(taps) {
+  const types = [
+    { key: "mood", label: "Mood", icon: "😊", max: 10 },
+    { key: "energy", label: "Energy", icon: "⚡", max: 10 },
+    { key: "sleep", label: "Sleep", icon: "😴", max: 12 },
+  ];
+  const pills = types.map(t => {
+    const val = taps[t.key];
+    const filled = val != null;
+    const cls = filled ? "qt-pill qt-filled" : "qt-pill";
+    const display = filled ? `${t.icon} ${val}` : `${t.icon} ${t.label}`;
+    return `<button class="${cls}" onclick="quickTap('${t.key}', ${t.max})">${display}</button>`;
+  }).join("");
+  return `<div class="quick-taps">${pills}</div>`;
+}
+
+async function quickTap(type, max) {
+  const val = prompt(`${type} (1-${max}):`);
+  if (val === null) return;
+  const num = parseFloat(val);
+  if (isNaN(num) || num < 1 || num > max) { toast("Invalid value"); return; }
+
+  const res = await api("/api/quicktap", {
+    method: "POST",
+    body: JSON.stringify({ type, value: num }),
+  });
+  if (res.ok) {
+    toast(`${type}: ${num}`);
+    loadDashboard();
+  } else {
+    toast("Failed to save");
+  }
+}
+
+// --- Feed item rendering ---
+
+function renderFeedItem(item) {
+  if (item.type === "task") return renderFeedTask(item);
+  if (item.type === "checkin") return renderFeedCheckin(item);
+  if (item.type === "habits") return renderFeedHabits(item);
+  return "";
+}
+
+function renderFeedTask(item) {
+  const done = item.done || item.urgency === "done";
+  const urgClass = item.urgency === "overdue" ? "feed-row-overdue"
+    : item.urgency === "done" ? "feed-row-done"
+    : item.urgency === "later" ? "feed-row-later"
+    : "";
+  const checkClass = done ? "item-check checked" : "item-check";
+  const checkIcon = done ? "✓" : "";
+  const textClass = done ? "feed-text done-text" : "feed-text";
+
+  return `<div class="feed-row ${urgClass}">
+    <div class="${checkClass}"
+         onclick="toggleItem(${item.id}, ${done})">${checkIcon}</div>
+    <div class="feed-main">
+      <div class="${textClass}">${escHtml(item.text)}</div>
+      <div class="feed-detail">${escHtml(item.detail || "")}${item.list_name ? ` · ${escHtml(item.list_name)}` : ""}</div>
+    </div>
+  </div>`;
+}
+
+function renderFeedCheckin(item) {
+  const icon = item.checkin_type === "morning" ? "☀️" : "🌙";
+  const cardId = item.checkin_type === "morning" ? "morning-card" : "evening-card";
+  return `<div class="feed-row feed-row-nudge" onclick="openCheckin('${item.checkin_type}')">
+    <div class="feed-nudge-icon">${icon}</div>
+    <div class="feed-main">
+      <div class="feed-text">${escHtml(item.text)}</div>
+      <div class="feed-detail">${escHtml(item.detail || "")}</div>
+    </div>
+    <div class="feed-nudge-arrow">›</div>
+  </div>`;
+}
+
+function renderFeedHabits(item) {
+  const habitBtns = item.habits.map(h => {
+    const streak = h.streak > 0 ? ` ${h.streak}🔥` : "";
+    return `<button class="feed-habit-btn" onclick="event.stopPropagation();logHabit('${escAttr(h.name)}')">${escHtml(h.name)}${streak}</button>`;
+  }).join("");
+  return `<div class="feed-row feed-row-habits">
+    <div class="feed-nudge-icon">🔄</div>
+    <div class="feed-main">
+      <div class="feed-text">${escHtml(item.text)}</div>
+      <div class="feed-habit-list">${habitBtns}</div>
+    </div>
+  </div>`;
+}
+
+// --- Checkin sheets ---
+
+let checkinOpen = null;
+
+function openCheckin(type) {
+  if (checkinOpen === type) { closeCheckin(); return; }
+  checkinOpen = type;
+  const existing = $("#checkin-sheet");
+  if (existing) existing.remove();
+
+  const sheet = document.createElement("div");
+  sheet.id = "checkin-sheet";
+  sheet.className = "checkin-sheet";
+  sheet.innerHTML = type === "morning" ? morningSheetHTML() : eveningSheetHTML();
+  $(".content").insertBefore(sheet, $(".content").firstChild.nextSibling?.nextSibling?.nextSibling || null);
+  requestAnimationFrame(() => sheet.classList.add("open"));
+}
+
+function closeCheckin() {
+  checkinOpen = null;
+  const sheet = $("#checkin-sheet");
+  if (sheet) {
+    sheet.classList.remove("open");
+    setTimeout(() => sheet.remove(), 200);
+  }
+}
+
+function morningSheetHTML() {
+  return `<div class="sheet-content">
+    <div class="sheet-header">☀️ Morning check-in <button class="sheet-close" onclick="closeCheckin()">✕</button></div>
+    <div class="slider-group">
+      <div class="slider-label"><span>Mood</span><span class="slider-value" id="mood-val">5</span></div>
+      <input type="range" min="1" max="10" value="5" id="mood-slider" oninput="$('#mood-val').textContent=this.value">
+    </div>
+    <div class="slider-group">
+      <div class="slider-label"><span>Energy</span><span class="slider-value" id="energy-val">5</span></div>
+      <input type="range" min="1" max="10" value="5" id="energy-slider" oninput="$('#energy-val').textContent=this.value">
+    </div>
+    <div class="slider-group">
+      <div class="slider-label"><span>Sleep (hours)</span><span class="slider-value" id="sleep-val">7</span></div>
+      <input type="range" min="0" max="12" step="0.5" value="7" id="sleep-slider" oninput="$('#sleep-val').textContent=this.value">
+    </div>
+    <div class="slider-group">
+      <label class="slider-label"><span>How are you feeling?</span></label>
+      <textarea id="morning-notes" placeholder="Slept ok, bit groggy..."></textarea>
+    </div>
+    <div class="slider-group">
+      <label class="slider-label"><span>What do you want to get done today?</span></label>
+      <textarea id="morning-intentions" placeholder="One thing per line"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="submitMorning()">Save check-in</button>
+  </div>`;
+}
+
+function eveningSheetHTML() {
+  return `<div class="sheet-content">
+    <div class="sheet-header">🌙 Evening wrap-up <button class="sheet-close" onclick="closeCheckin()">✕</button></div>
+    <div class="slider-group">
+      <div class="slider-label"><span>End-of-day mood</span><span class="slider-value" id="eve-mood-val">5</span></div>
+      <input type="range" min="1" max="10" value="5" id="eve-mood-slider" oninput="$('#eve-mood-val').textContent=this.value">
+    </div>
+    <div class="slider-group">
+      <label class="slider-label"><span>How did today go?</span></label>
+      <textarea id="eve-reflection" placeholder="What went well? What was hard?"></textarea>
+    </div>
+    <div class="slider-group">
+      <label class="slider-label"><span>One thing you're grateful for</span></label>
+      <input type="text" class="text-input" id="eve-gratitude" placeholder="Anything at all...">
+    </div>
+    <button class="btn btn-primary" onclick="submitEvening()">Save wrap-up</button>
+  </div>`;
 }
 
 function bindCaptureInput() {
@@ -231,58 +354,6 @@ async function addTodoInline(input) {
 
 // --- Morning check-in ---
 
-function renderMorningCard(done) {
-  const openClass = done ? "done-card" : "open";
-  const icon = done ? "✅" : "☀️";
-  const label = done ? "Morning check-in done" : "Morning check-in";
-
-  return `<div class="card checkin-card ${openClass}" id="morning-card">
-    <div class="checkin-toggle" onclick="toggleCheckin('morning-card')">
-      <div class="card-header" style="margin-bottom:0">
-        <span class="emoji">${icon}</span> ${label}
-      </div>
-      <span class="chevron">▼</span>
-    </div>
-    <div class="checkin-body">
-      <div style="padding-top:14px">
-        <div class="slider-group">
-          <div class="slider-label">
-            <span>Mood</span>
-            <span class="slider-value" id="mood-val">5</span>
-          </div>
-          <input type="range" min="1" max="10" value="5" id="mood-slider"
-                 oninput="$('#mood-val').textContent=this.value">
-        </div>
-        <div class="slider-group">
-          <div class="slider-label">
-            <span>Energy</span>
-            <span class="slider-value" id="energy-val">5</span>
-          </div>
-          <input type="range" min="1" max="10" value="5" id="energy-slider"
-                 oninput="$('#energy-val').textContent=this.value">
-        </div>
-        <div class="slider-group">
-          <div class="slider-label">
-            <span>Sleep (hours)</span>
-            <span class="slider-value" id="sleep-val">7</span>
-          </div>
-          <input type="range" min="0" max="12" step="0.5" value="7" id="sleep-slider"
-                 oninput="$('#sleep-val').textContent=this.value">
-        </div>
-        <div class="slider-group">
-          <label class="slider-label"><span>How are you feeling?</span></label>
-          <textarea id="morning-notes" placeholder="Slept ok, bit groggy..."></textarea>
-        </div>
-        <div class="slider-group">
-          <label class="slider-label"><span>What do you want to get done today?</span></label>
-          <textarea id="morning-intentions" placeholder="One thing per line&#10;Call the dentist&#10;Finish the report"></textarea>
-        </div>
-        <button class="btn btn-primary" onclick="submitMorning()">Save check-in</button>
-      </div>
-    </div>
-  </div>`;
-}
-
 async function submitMorning() {
   const mood = parseFloat($("#mood-slider").value);
   const energy = parseFloat($("#energy-slider").value);
@@ -298,6 +369,7 @@ async function submitMorning() {
 
   if (res.ok) {
     toast("Morning check-in saved ☀️");
+    closeCheckin();
     loadDashboard();
   } else {
     toast("Failed to save");
@@ -305,52 +377,6 @@ async function submitMorning() {
 }
 
 // --- Evening wrap-up ---
-
-function renderEveningCard() {
-  const hasReflection = todayData.tracking.some(t => t.type === "reflection");
-  const openClass = hasReflection ? "done-card" : "";
-  const icon = hasReflection ? "✅" : "🌙";
-  const label = hasReflection ? "Evening wrap-up done" : "Evening wrap-up";
-
-  // Summary of the day
-  const doneCount = todayData.focus.filter(i => i.done).length;
-  const totalFocus = todayData.focus.length;
-  const habitsLogged = todayData.habits.filter(h => h.done).length;
-  const totalHabits = todayData.habits.length;
-
-  return `<div class="card checkin-card ${openClass}" id="evening-card">
-    <div class="checkin-toggle" onclick="toggleCheckin('evening-card')">
-      <div class="card-header" style="margin-bottom:0">
-        <span class="emoji">${icon}</span> ${label}
-      </div>
-      <span class="chevron">▼</span>
-    </div>
-    <div class="checkin-body">
-      <div style="padding-top:14px">
-        <div style="margin-bottom:14px;font-size:14px;color:var(--text-secondary)">
-          Today: ${doneCount}/${totalFocus} tasks done, ${habitsLogged}/${totalHabits} habits logged
-        </div>
-        <div class="slider-group">
-          <div class="slider-label">
-            <span>End-of-day mood</span>
-            <span class="slider-value" id="eve-mood-val">5</span>
-          </div>
-          <input type="range" min="1" max="10" value="5" id="eve-mood-slider"
-                 oninput="$('#eve-mood-val').textContent=this.value">
-        </div>
-        <div class="slider-group">
-          <label class="slider-label"><span>How did today go?</span></label>
-          <textarea id="eve-reflection" placeholder="What went well? What was hard?"></textarea>
-        </div>
-        <div class="slider-group">
-          <label class="slider-label"><span>One thing you're grateful for</span></label>
-          <input type="text" class="text-input" id="eve-gratitude" placeholder="Anything at all...">
-        </div>
-        <button class="btn btn-primary" onclick="submitEvening()">Save wrap-up</button>
-      </div>
-    </div>
-  </div>`;
-}
 
 async function submitEvening() {
   const mood = parseFloat($("#eve-mood-slider").value);
@@ -364,6 +390,7 @@ async function submitEvening() {
 
   if (res.ok) {
     toast("Evening wrap-up saved 🌙");
+    closeCheckin();
     loadDashboard();
   } else {
     toast("Failed to save");
@@ -501,8 +528,9 @@ function showChatBubble(type, text) {
 // --- UI helpers ---
 
 function toggleCheckin(id) {
+  // Legacy — kept for track view if needed
   const card = document.getElementById(id);
-  card.classList.toggle("open");
+  if (card) card.classList.toggle("open");
 }
 
 function escHtml(s) {
