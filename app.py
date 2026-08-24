@@ -284,6 +284,45 @@ def trigger_backup():
     return jsonify({"status": "sent", "ok": result.get("ok", False)})
 
 
+# --- Deploy (git pull + reload) ---
+
+@app.route("/trigger/deploy", methods=["GET", "POST"])
+def trigger_deploy():
+    """Pull latest code from GitHub and reload the web app."""
+    if not check_cron_secret():
+        return jsonify({"error": "unauthorized"}), 403
+
+    import subprocess
+
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        result = subprocess.run(
+            ["git", "pull"], cwd=project_dir,
+            capture_output=True, text=True, timeout=30
+        )
+        git_output = result.stdout.strip() or result.stderr.strip()
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    # Touch the WSGI file to trigger a reload
+    # This may kill the process before the response is sent — that's ok
+    wsgi_path = "/var/www/sorchanolan_pythonanywhere_com_wsgi.py"
+    try:
+        if os.path.exists(wsgi_path):
+            os.utime(wsgi_path, None)
+            reloaded = True
+        else:
+            reloaded = False
+    except Exception:
+        reloaded = False
+
+    return jsonify({
+        "status": "deployed",
+        "git": git_output,
+        "reloaded": reloaded,
+    })
+
+
 # --- Webhook health check ---
 
 @app.route("/trigger/healthcheck", methods=["GET", "POST"])

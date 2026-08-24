@@ -653,6 +653,30 @@ function backToLists() {
   loadLists();
 }
 
+// --- Deploy ---
+
+async function triggerDeploy() {
+  if (!confirm("Pull latest code and reload?")) return;
+  const btn = $(".deploy-btn");
+  btn.classList.add("spinning");
+  toast("Deploying...");
+
+  try {
+    const res = await api("/api/deploy", { method: "POST" });
+    const d = await res.json();
+    toast(d.git || d.message || "Deployed! 🚀");
+  } catch {
+    // Expected — the reload may kill the connection
+    toast("Deploy triggered — reloading 🚀");
+  }
+
+  setTimeout(() => {
+    btn.classList.remove("spinning");
+    // Reload the PWA after a short delay to pick up any frontend changes
+    setTimeout(() => window.location.reload(), 3000);
+  }, 1000);
+}
+
 // --- Refresh ---
 
 async function refresh() {

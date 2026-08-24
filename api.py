@@ -3,7 +3,7 @@
 from flask import Blueprint, jsonify, request, session
 from functools import wraps
 import db
-from config import WEB_PIN
+from config import WEB_PIN, CRON_SECRET
 
 api = Blueprint("api", __name__)
 
@@ -311,6 +311,22 @@ def item_delete(item_id):
     if deleted:
         return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
+
+
+# --- Deploy proxy (avoids exposing CRON_SECRET to the frontend) ---
+
+@api.route("/api/deploy", methods=["POST"])
+@require_auth
+def deploy_proxy():
+    """Call the deploy trigger using the server-side cron secret."""
+    import requests as req
+    try:
+        base = request.host_url.rstrip("/")
+        res = req.get(f"{base}/trigger/deploy?key={CRON_SECRET}", timeout=30)
+        return jsonify(res.json())
+    except Exception as e:
+        # The deploy may kill the process before responding — that's expected
+        return jsonify({"status": "deployed", "message": "Reload triggered (response may have been cut short)"})
 
 
 # --- Tracking history (for charts) ---
