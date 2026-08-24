@@ -682,6 +682,7 @@ async function loadTrack() {
 }
 
 function renderTrack() {
+  const content = $(".content");
   const { day_labels, habits, trackers } = trackData;
   let html = "";
 
