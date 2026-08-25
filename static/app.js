@@ -103,7 +103,6 @@ function renderDashboard() {
 
   // Update header
   $(".greeting").textContent = greeting();
-  $(".pending-badge").textContent = `${todayData.pending_count} pending`;
 
   let html = "";
 
@@ -456,16 +455,7 @@ async function logHabit(name) {
   }
 }
 
-// --- Quick capture / chat ---
-
-function isQuestion(text) {
-  const t = text.trim().toLowerCase();
-  if (t.endsWith("?")) return true;
-  const starters = ["what ", "when ", "where ", "who ", "why ", "how ", "which ",
-    "should ", "could ", "can ", "do ", "does ", "is ", "are ", "will ",
-    "tell me", "suggest", "recommend", "help me"];
-  return starters.some(s => t.startsWith(s));
-}
+// --- Smart input (unified capture + chat + commands) ---
 
 async function sendCapture() {
   const input = $(".capture-input");
@@ -476,32 +466,25 @@ async function sendCapture() {
   const btn = $(".capture-send");
   btn.disabled = true;
 
+  showChatBubble("thinking", text);
+
   try {
-    if (isQuestion(text)) {
-      // Chat mode — show thinking indicator
-      showChatBubble("thinking", text);
-      const res = await api("/api/chat", {
-        method: "POST",
-        body: JSON.stringify({ text }),
-      });
-      const d = await res.json();
-      showChatBubble("reply", d.reply || "No response");
-    } else {
-      // Action mode — capture as before
-      const res = await api("/api/capture", {
-        method: "POST",
-        body: JSON.stringify({ text }),
-      });
-      if (res.ok) {
-        const d = await res.json();
-        toast(d.result || "Captured ✓");
+    const res = await api("/api/smart", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    const d = await res.json();
+    showChatBubble("reply", d.reply || "Done");
+
+    // Refresh if actions were taken
+    if (d.actions_taken && d.actions_taken.length > 0) {
+      setTimeout(() => {
         if (currentTab === "today") loadDashboard();
-      } else {
-        toast("Failed to capture");
-      }
+        else if (currentTab === "lists") { if (currentList) openList(currentList); else loadLists(); }
+      }, 500);
     }
   } catch {
-    toast("Network error");
+    showChatBubble("reply", "Network error — try again");
   } finally {
     btn.disabled = false;
   }

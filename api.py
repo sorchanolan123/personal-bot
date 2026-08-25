@@ -321,84 +321,12 @@ def item_undone(item_id):
     return jsonify({"ok": True})
 
 
-# --- Quick capture ---
+# --- Smart input (unified capture + chat + commands) ---
 
-@api.route("/api/capture", methods=["POST"])
+@api.route("/api/smart", methods=["POST"])
 @require_auth
-def capture():
-    data = request.json or {}
-    text = data.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "empty"}), 400
-
-    # Try LLM parsing first
-    try:
-        from llm import parse_freeform
-        lists = db.get_lists()
-        list_names = [l["name"] for l in lists]
-        if "inbox" not in list_names:
-            db.create_list("inbox", "Catch-all for unsorted items")
-        actions = parse_freeform(text, list_names)
-    except Exception:
-        actions = None
-
-    if not actions:
-        # Fallback: add to inbox with date parsing
-        from handlers import parse_due_date
-        clean, due = parse_due_date(text)
-        if not db.list_exists("inbox"):
-            db.create_list("inbox", "Catch-all for unsorted items")
-        db.add_item("inbox", clean, due_date=due)
-        return jsonify({"ok": True, "result": f"Added to inbox: {clean}"})
-
-    # Process LLM actions
-    import re
-    results = []
-    for action in actions:
-        a_type = action.get("action")
-        if a_type == "list_item":
-            list_name = action.get("list", "inbox").lower()
-            item_text = action.get("text", "")
-            due = action.get("due_date")
-            if not db.list_exists(list_name):
-                if re.match(r"^[a-z][a-z0-9_]{0,29}$", list_name):
-                    db.create_list(list_name)
-                else:
-                    list_name = "inbox"
-            db.add_item(list_name, item_text, due_date=due)
-            results.append(f"Added to {list_name}: {item_text}")
-        elif a_type == "tracking":
-            type_ = action.get("type", "custom")
-            value = action.get("value")
-            notes = action.get("notes", "")
-            db.add_tracking(type_, value, notes)
-            results.append(f"Tracked {type_}")
-        elif a_type == "mark_done":
-            list_name = action.get("list", "").lower()
-            search_text = action.get("text", "")
-            if list_name and db.list_exists(list_name) and search_text:
-                pos, item = db.find_item_by_text(list_name, search_text)
-                if pos:
-                    db.mark_done(list_name, pos)
-                    results.append(f"Done: {item['text']}")
-        elif a_type == "remove_item":
-            list_name = action.get("list", "").lower()
-            search_text = action.get("text", "")
-            if list_name and db.list_exists(list_name) and search_text:
-                pos, item = db.find_item_by_text(list_name, search_text)
-                if pos:
-                    db.delete_item(list_name, pos)
-                    results.append(f"Removed: {item['text']}")
-
-    return jsonify({"ok": True, "result": "; ".join(results) if results else "Processed"})
-
-
-# --- Chat (question answering) ---
-
-@api.route("/api/chat", methods=["POST"])
-@require_auth
-def chat():
-    """Answer a question using LLM with context from the user's data."""
+def smart():
+    """Single endpoint for all text input — questions, actions, commands."""
     data = request.json or {}
     text = data.get("text", "").strip()
     if not text:
@@ -406,59 +334,201 @@ def chat():
 
     try:
         from llm import call_haiku
-        import json
+        import json, re
+        from datetime import datetime
 
-        # Gather context from the user's data
+        # Gather full context
+        all_lists = db.get_lists()
+        list_names = [l["name"] for l in all_lists]
         context_parts = []
 
-        # Lists and their items
-        all_lists = db.get_lists()
         for lst in all_lists:
             items = db.get_items(lst["name"], include_done=False)
             if items:
-                item_texts = [i["text"] for i in items[:20]]
-                context_parts.append(f"List '{lst['name']}': {', '.join(item_texts)}")
+                item_texts = [f"- {i['text']}" for i in items[:25]]
+                context_parts.append(f"List '{lst['name']}' ({len(items)} items):\n" + "\n".join(item_texts))
 
-        # Today's focus
         focus = db.get_focus_today()
         if focus:
             done = [f["text"] for f in focus if f["done"]]
             pending = [f["text"] for f in focus if not f["done"]]
             if pending:
-                context_parts.append(f"Today's pending tasks: {', '.join(pending)}")
+                context_parts.append(f"Due today (pending): {', '.join(pending)}")
             if done:
-                context_parts.append(f"Today's completed tasks: {', '.join(done)}")
+                context_parts.append(f"Completed today: {', '.join(done)}")
 
-        # Habits
+        overdue = db.get_overdue()
+        if overdue:
+            context_parts.append(f"Overdue: {', '.join(i['text'] + ' (due ' + i['due_date'] + ')' for i in overdue)}")
+
         habits = db.get_habits()
         logged = db.get_habits_logged_today()
         if habits:
             habit_status = [f"{h['name']} ({'done' if h['name'] in logged else 'not done'})" for h in habits]
             context_parts.append(f"Habits: {', '.join(habit_status)}")
 
-        # Recent tracking
         tracking = db.get_tracking_today()
         if tracking:
             track_summary = [f"{t['type']}: {t['value']}" for t in tracking if t["value"] is not None]
             if track_summary:
                 context_parts.append(f"Today's tracking: {', '.join(track_summary)}")
 
-        context = "\n".join(context_parts) if context_parts else "No data yet."
+        completed_week = db.get_completed_since(days=7)
+        context_parts.append(f"Completed this week: {len(completed_week)} items")
 
-        system = f"""You are a friendly personal assistant embedded in a life management app.
-The user is asking you a question. Use their data to give helpful, personalised answers.
-Keep responses concise (2-3 sentences max). Be warm and supportive.
+        context = "\n\n".join(context_parts) if context_parts else "No data yet."
+
+        system = f"""You are a smart personal assistant inside a life management app. The user types something in their "What's on your mind?" input. You can BOTH reply conversationally AND perform actions on their data.
+
+Return ONLY valid JSON with this shape:
+{{"reply": "your conversational response", "actions": [...]}}
+
+The reply should ALWAYS be present — keep it short and natural (1-3 sentences). The actions array can be empty if no changes are needed.
+
+Available actions:
+
+1. Add item: {{"action": "list_item", "list": "<name>", "text": "<item>", "due_date": "<YYYY-MM-DD or null>"}}
+2. Mark done: {{"action": "mark_done", "list": "<name>", "text": "<search text>"}}
+3. Remove item: {{"action": "remove_item", "list": "<name>", "text": "<search text>"}}
+4. Edit item: {{"action": "edit_item", "list": "<name>", "search": "<text to find>", "new_text": "<replacement>"}}
+5. Rename list: {{"action": "rename_list", "old_name": "<current>", "new_name": "<new>"}}
+6. Create list: {{"action": "create_list", "name": "<name>", "description": "<desc>"}}
+7. Transform list: {{"action": "transform_list", "list": "<name>", "transform": "capitalize|uppercase|lowercase|title_case"}}
+8. Track value: {{"action": "tracking", "type": "<mood|energy|sleep|etc>", "value": <number or null>, "notes": "<text>"}}
+9. Log habit: {{"action": "log_habit", "name": "<habit name>"}}
+10. Create habit: {{"action": "create_habit", "name": "<name>"}}
+11. Delete habit: {{"action": "delete_habit", "name": "<name>"}}
+
+Rules:
+- List names are lowercase, single words, letters/numbers/underscores only
+- Available lists: {json.dumps(list_names)}
+- Today's date: {datetime.now().strftime('%A, %Y-%m-%d')}
+- If adding to a list that doesn't exist, use the name anyway — it auto-creates
+- For questions/stats/summaries, put the answer in "reply" with no actions
+- For commands like "rename X to Y", include actions AND a confirmation reply
+- Be warm and concise. Don't be patronising.
+- Return ONLY the JSON object, no markdown fences, no explanation
 
 User's current data:
 {context}"""
 
-        reply = call_haiku(system, text)
-        if reply:
-            return jsonify({"ok": True, "reply": reply})
-        return jsonify({"ok": False, "reply": "Hmm, I couldn't think of an answer. Try again?"}), 500
+        result = call_haiku(system, text)
+        if not result:
+            return jsonify({"ok": True, "reply": "Sorry, I couldn't process that. Try again?"})
+
+        # Parse LLM response
+        cleaned = result.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1]
+            cleaned = cleaned.rsplit("```", 1)[0]
+
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # If it's not JSON, treat it as a plain reply
+            return jsonify({"ok": True, "reply": cleaned})
+
+        reply = parsed.get("reply", "Done")
+        actions = parsed.get("actions", [])
+
+        # Execute actions
+        action_results = []
+        for action in actions:
+            a_type = action.get("action")
+            try:
+                if a_type == "list_item":
+                    list_name = action.get("list", "inbox").lower()
+                    item_text = action.get("text", "")
+                    due = action.get("due_date")
+                    if not db.list_exists(list_name):
+                        if re.match(r"^[a-z][a-z0-9_]{0,29}$", list_name):
+                            db.create_list(list_name)
+                        else:
+                            list_name = "inbox"
+                    db.add_item(list_name, item_text, due_date=due)
+                    action_results.append(f"added to {list_name}")
+
+                elif a_type == "mark_done":
+                    list_name = action.get("list", "").lower()
+                    search_text = action.get("text", "")
+                    if list_name and db.list_exists(list_name) and search_text:
+                        pos, item = db.find_item_by_text(list_name, search_text)
+                        if pos:
+                            db.mark_done(list_name, pos)
+                            action_results.append(f"done: {item['text']}")
+
+                elif a_type == "remove_item":
+                    list_name = action.get("list", "").lower()
+                    search_text = action.get("text", "")
+                    if list_name and db.list_exists(list_name) and search_text:
+                        pos, item = db.find_item_by_text(list_name, search_text)
+                        if pos:
+                            db.delete_item(list_name, pos)
+                            action_results.append(f"removed: {item['text']}")
+
+                elif a_type == "edit_item":
+                    list_name = action.get("list", "").lower()
+                    search_text = action.get("search", "")
+                    new_text = action.get("new_text", "")
+                    if list_name and db.list_exists(list_name) and search_text and new_text:
+                        pos, item = db.find_item_by_text(list_name, search_text)
+                        if pos:
+                            db.edit_item(list_name, pos, new_text)
+                            action_results.append(f"edited: {new_text}")
+
+                elif a_type == "rename_list":
+                    old = action.get("old_name", "").lower()
+                    new = action.get("new_name", "").lower()
+                    if old and new:
+                        ok, msg = db.rename_list(old, new)
+                        action_results.append(f"renamed {old} to {new}" if ok else f"rename failed: {msg}")
+
+                elif a_type == "create_list":
+                    name = action.get("name", "").lower()
+                    desc = action.get("description", "")
+                    if name and re.match(r"^[a-z][a-z0-9_]{0,29}$", name):
+                        db.create_list(name, desc)
+                        action_results.append(f"created list: {name}")
+
+                elif a_type == "transform_list":
+                    list_name = action.get("list", "").lower()
+                    transform = action.get("transform", "")
+                    if list_name and db.list_exists(list_name) and transform:
+                        count = db.transform_list_items(list_name, transform)
+                        action_results.append(f"transformed {count} items in {list_name}")
+
+                elif a_type == "tracking":
+                    type_ = action.get("type", "custom")
+                    value = action.get("value")
+                    notes = action.get("notes", "")
+                    db.add_tracking(type_, value, notes)
+                    action_results.append(f"tracked {type_}")
+
+                elif a_type == "log_habit":
+                    name = action.get("name", "").lower()
+                    if name:
+                        db.log_habit(name)
+                        action_results.append(f"logged {name}")
+
+                elif a_type == "create_habit":
+                    name = action.get("name", "").lower()
+                    if name:
+                        db.create_habit(name)
+                        action_results.append(f"created habit: {name}")
+
+                elif a_type == "delete_habit":
+                    name = action.get("name", "").lower()
+                    if name:
+                        db.delete_habit(name)
+                        action_results.append(f"deleted habit: {name}")
+
+            except Exception as e:
+                action_results.append(f"error: {str(e)}")
+
+        return jsonify({"ok": True, "reply": reply, "actions_taken": action_results})
 
     except Exception as e:
-        return jsonify({"ok": False, "reply": f"Something went wrong: {str(e)}"}), 500
+        return jsonify({"ok": True, "reply": f"Something went wrong: {str(e)}"})
 
 
 # --- Lists ---

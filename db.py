@@ -278,6 +278,34 @@ def mark_undone(list_name, item_number):
     return True
 
 
+def transform_list_items(list_name, transform):
+    """Apply a text transformation to all pending items in a list.
+    transform: 'capitalize'|'uppercase'|'lowercase'|'title_case'
+    Returns count of items changed."""
+    items = get_items(list_name, include_done=False)
+    if not items:
+        return 0
+    transforms = {
+        "capitalize": lambda s: s.capitalize(),
+        "uppercase": lambda s: s.upper(),
+        "lowercase": lambda s: s.lower(),
+        "title_case": lambda s: s.title(),
+    }
+    fn = transforms.get(transform)
+    if not fn:
+        return 0
+    conn = get_db()
+    count = 0
+    for item in items:
+        new_text = fn(item["text"])
+        if new_text != item["text"]:
+            conn.execute("UPDATE items SET text = ? WHERE id = ?", (new_text, item["id"]))
+            count += 1
+    conn.commit()
+    conn.close()
+    return count
+
+
 def clear_done(list_name):
     conn = get_db()
     cursor = conn.execute(
