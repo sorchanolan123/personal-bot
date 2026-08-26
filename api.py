@@ -378,14 +378,23 @@ def _try_fast_route(text):
     if _NEEDS_LLM.search(text.strip()):
         return None
 
-    # 4. Simple add — just dump it into inbox with date parsing
+    # 4. List-name prefix routing: "shopping buy milk" → list=shopping, text="buy milk"
     from handlers import parse_due_date
-    clean, due = parse_due_date(text)
-    if not db.list_exists("inbox"):
-        db.create_list("inbox", "Catch-all for unsorted items")
-    db.add_item("inbox", clean, due_date=due)
+    target_list = "todo"
+    item_text = text
+    first_word = lower.split()[0] if lower.split() else ""
+    existing_lists = {l["name"] for l in db.get_lists()}
+    if first_word in existing_lists and len(lower.split()) > 1:
+        target_list = first_word
+        item_text = text[len(first_word):].strip()
+
+    # Simple add with date parsing
+    clean, due = parse_due_date(item_text)
+    if not db.list_exists(target_list):
+        db.create_list(target_list)
+    db.add_item(target_list, clean, due_date=due)
     due_msg = f" (due {due})" if due else ""
-    return {"ok": True, "reply": f"Added to inbox: {clean}{due_msg}", "actions_taken": ["added to inbox"]}
+    return {"ok": True, "reply": f"Added to {target_list}: {clean}{due_msg}", "actions_taken": [f"added to {target_list}"]}
 
 
 @api.route("/api/smart", methods=["POST"])
