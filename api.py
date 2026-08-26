@@ -323,6 +323,71 @@ def item_undone(item_id):
 
 # --- Smart input (unified capture + chat + commands) ---
 
+import re as _re
+
+# Words that signal the input needs LLM interpretation
+_NEEDS_LLM = _re.compile(
+    r"\?$|"
+    r"^(what |when |where |who |why |how |which |should |could |can |do |does |is |are |will |"
+    r"tell me|suggest|recommend|help me|show me|"
+    r"rename |delete |remove |capitalize |uppercase |lowercase |transform |"
+    r"edit |change |move |clear |mark .* done|"
+    r"write me|give me|summarize|summarise|wrap.?up|stats|"
+    r"add .* to my )",
+    _re.IGNORECASE,
+)
+
+# Quick-track pattern: "mood 7", "energy 8", "sleep 6.5"
+_QUICK_TRACK = _re.compile(
+    r"^(mood|energy|sleep)\s+(\d+\.?\d*)$", _re.IGNORECASE
+)
+
+
+def _try_fast_route(text):
+    """Try to handle input without an LLM call. Returns a response dict or None."""
+    import re
+    lower = text.strip().lower()
+
+    # 1. Quick tracking: "mood 7", "energy 8", "sleep 6.5"
+    m = _QUICK_TRACK.match(text.strip())
+    if m:
+        type_, val = m.group(1).lower(), float(m.group(2))
+        limits = {"mood": 10, "energy": 10, "sleep": 12}
+        if val < 0 or val > limits.get(type_, 10):
+            return {"ok": True, "reply": f"That's out of range (0-{limits.get(type_, 10)})"}
+        db.add_tracking(type_, val)
+        return {"ok": True, "reply": f"Logged {type_}: {val}", "actions_taken": [f"tracked {type_}"]}
+
+    # 2. Habit log: input is exactly a known habit name (or "log <habit>")
+    habits = {h["name"] for h in db.get_habits()}
+    logged_today = db.get_habits_logged_today()
+    habit_match = None
+    if lower in habits:
+        habit_match = lower
+    elif lower.startswith("log ") and lower[4:].strip() in habits:
+        habit_match = lower[4:].strip()
+    if habit_match:
+        if habit_match in logged_today:
+            return {"ok": True, "reply": f"Already logged {habit_match} today"}
+        db.log_habit(habit_match)
+        streak = db.get_habit_streak(habit_match)
+        streak_msg = f" ({streak} day streak!)" if streak > 1 else ""
+        return {"ok": True, "reply": f"Logged {habit_match}{streak_msg}", "actions_taken": [f"logged {habit_match}"]}
+
+    # 3. If it looks like it needs LLM (question, command, complex), return None
+    if _NEEDS_LLM.search(text.strip()):
+        return None
+
+    # 4. Simple add — just dump it into inbox with date parsing
+    from handlers import parse_due_date
+    clean, due = parse_due_date(text)
+    if not db.list_exists("inbox"):
+        db.create_list("inbox", "Catch-all for unsorted items")
+    db.add_item("inbox", clean, due_date=due)
+    due_msg = f" (due {due})" if due else ""
+    return {"ok": True, "reply": f"Added to inbox: {clean}{due_msg}", "actions_taken": ["added to inbox"]}
+
+
 @api.route("/api/smart", methods=["POST"])
 @require_auth
 def smart():
@@ -332,6 +397,12 @@ def smart():
     if not text:
         return jsonify({"error": "empty"}), 400
 
+    # Try fast route first (no LLM call)
+    fast = _try_fast_route(text)
+    if fast is not None:
+        return jsonify(fast)
+
+    # Complex input — use LLM
     try:
         from llm import call_haiku
         import json, re
@@ -432,103 +503,111 @@ User's current data:
         actions = parsed.get("actions", [])
 
         # Execute actions
-        action_results = []
-        for action in actions:
-            a_type = action.get("action")
-            try:
-                if a_type == "list_item":
-                    list_name = action.get("list", "inbox").lower()
-                    item_text = action.get("text", "")
-                    due = action.get("due_date")
-                    if not db.list_exists(list_name):
-                        if re.match(r"^[a-z][a-z0-9_]{0,29}$", list_name):
-                            db.create_list(list_name)
-                        else:
-                            list_name = "inbox"
-                    db.add_item(list_name, item_text, due_date=due)
-                    action_results.append(f"added to {list_name}")
-
-                elif a_type == "mark_done":
-                    list_name = action.get("list", "").lower()
-                    search_text = action.get("text", "")
-                    if list_name and db.list_exists(list_name) and search_text:
-                        pos, item = db.find_item_by_text(list_name, search_text)
-                        if pos:
-                            db.mark_done(list_name, pos)
-                            action_results.append(f"done: {item['text']}")
-
-                elif a_type == "remove_item":
-                    list_name = action.get("list", "").lower()
-                    search_text = action.get("text", "")
-                    if list_name and db.list_exists(list_name) and search_text:
-                        pos, item = db.find_item_by_text(list_name, search_text)
-                        if pos:
-                            db.delete_item(list_name, pos)
-                            action_results.append(f"removed: {item['text']}")
-
-                elif a_type == "edit_item":
-                    list_name = action.get("list", "").lower()
-                    search_text = action.get("search", "")
-                    new_text = action.get("new_text", "")
-                    if list_name and db.list_exists(list_name) and search_text and new_text:
-                        pos, item = db.find_item_by_text(list_name, search_text)
-                        if pos:
-                            db.edit_item(list_name, pos, new_text)
-                            action_results.append(f"edited: {new_text}")
-
-                elif a_type == "rename_list":
-                    old = action.get("old_name", "").lower()
-                    new = action.get("new_name", "").lower()
-                    if old and new:
-                        ok, msg = db.rename_list(old, new)
-                        action_results.append(f"renamed {old} to {new}" if ok else f"rename failed: {msg}")
-
-                elif a_type == "create_list":
-                    name = action.get("name", "").lower()
-                    desc = action.get("description", "")
-                    if name and re.match(r"^[a-z][a-z0-9_]{0,29}$", name):
-                        db.create_list(name, desc)
-                        action_results.append(f"created list: {name}")
-
-                elif a_type == "transform_list":
-                    list_name = action.get("list", "").lower()
-                    transform = action.get("transform", "")
-                    if list_name and db.list_exists(list_name) and transform:
-                        count = db.transform_list_items(list_name, transform)
-                        action_results.append(f"transformed {count} items in {list_name}")
-
-                elif a_type == "tracking":
-                    type_ = action.get("type", "custom")
-                    value = action.get("value")
-                    notes = action.get("notes", "")
-                    db.add_tracking(type_, value, notes)
-                    action_results.append(f"tracked {type_}")
-
-                elif a_type == "log_habit":
-                    name = action.get("name", "").lower()
-                    if name:
-                        db.log_habit(name)
-                        action_results.append(f"logged {name}")
-
-                elif a_type == "create_habit":
-                    name = action.get("name", "").lower()
-                    if name:
-                        db.create_habit(name)
-                        action_results.append(f"created habit: {name}")
-
-                elif a_type == "delete_habit":
-                    name = action.get("name", "").lower()
-                    if name:
-                        db.delete_habit(name)
-                        action_results.append(f"deleted habit: {name}")
-
-            except Exception as e:
-                action_results.append(f"error: {str(e)}")
+        action_results = _execute_actions(actions)
 
         return jsonify({"ok": True, "reply": reply, "actions_taken": action_results})
 
     except Exception as e:
         return jsonify({"ok": True, "reply": f"Something went wrong: {str(e)}"})
+
+
+def _execute_actions(actions):
+    """Execute a list of LLM-generated actions. Returns list of result strings."""
+    import re
+    results = []
+    for action in actions:
+        a_type = action.get("action")
+        try:
+            if a_type == "list_item":
+                list_name = action.get("list", "inbox").lower()
+                item_text = action.get("text", "")
+                due = action.get("due_date")
+                if not db.list_exists(list_name):
+                    if re.match(r"^[a-z][a-z0-9_]{0,29}$", list_name):
+                        db.create_list(list_name)
+                    else:
+                        list_name = "inbox"
+                db.add_item(list_name, item_text, due_date=due)
+                results.append(f"added to {list_name}")
+
+            elif a_type == "mark_done":
+                list_name = action.get("list", "").lower()
+                search_text = action.get("text", "")
+                if list_name and db.list_exists(list_name) and search_text:
+                    pos, item = db.find_item_by_text(list_name, search_text)
+                    if pos:
+                        db.mark_done(list_name, pos)
+                        results.append(f"done: {item['text']}")
+
+            elif a_type == "remove_item":
+                list_name = action.get("list", "").lower()
+                search_text = action.get("text", "")
+                if list_name and db.list_exists(list_name) and search_text:
+                    pos, item = db.find_item_by_text(list_name, search_text)
+                    if pos:
+                        db.delete_item(list_name, pos)
+                        results.append(f"removed: {item['text']}")
+
+            elif a_type == "edit_item":
+                list_name = action.get("list", "").lower()
+                search_text = action.get("search", "")
+                new_text = action.get("new_text", "")
+                if list_name and db.list_exists(list_name) and search_text and new_text:
+                    pos, item = db.find_item_by_text(list_name, search_text)
+                    if pos:
+                        db.edit_item(list_name, pos, new_text)
+                        results.append(f"edited: {new_text}")
+
+            elif a_type == "rename_list":
+                old = action.get("old_name", "").lower()
+                new = action.get("new_name", "").lower()
+                if old and new:
+                    ok, msg = db.rename_list(old, new)
+                    results.append(f"renamed {old} to {new}" if ok else f"rename failed: {msg}")
+
+            elif a_type == "create_list":
+                name = action.get("name", "").lower()
+                desc = action.get("description", "")
+                if name and re.match(r"^[a-z][a-z0-9_]{0,29}$", name):
+                    db.create_list(name, desc)
+                    results.append(f"created list: {name}")
+
+            elif a_type == "transform_list":
+                list_name = action.get("list", "").lower()
+                transform = action.get("transform", "")
+                if list_name and db.list_exists(list_name) and transform:
+                    count = db.transform_list_items(list_name, transform)
+                    results.append(f"transformed {count} items in {list_name}")
+
+            elif a_type == "tracking":
+                type_ = action.get("type", "custom")
+                value = action.get("value")
+                notes = action.get("notes", "")
+                db.add_tracking(type_, value, notes)
+                results.append(f"tracked {type_}")
+
+            elif a_type == "log_habit":
+                name = action.get("name", "").lower()
+                if name:
+                    db.log_habit(name)
+                    results.append(f"logged {name}")
+
+            elif a_type == "create_habit":
+                name = action.get("name", "").lower()
+                if name:
+                    db.create_habit(name)
+                    results.append(f"created habit: {name}")
+
+            elif a_type == "delete_habit":
+                name = action.get("name", "").lower()
+                if name:
+                    db.delete_habit(name)
+                    results.append(f"deleted habit: {name}")
+
+        except Exception as e:
+            results.append(f"error: {str(e)}")
+
+    return results
 
 
 # --- Lists ---
