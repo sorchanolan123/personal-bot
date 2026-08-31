@@ -331,7 +331,7 @@ _NEEDS_LLM = _re.compile(
     r"^(what |when |where |who |why |how |which |should |could |can |do |does |is |are |will |"
     r"tell me|suggest|recommend|help me|show me|"
     r"rename |delete |remove |capitalize |uppercase |lowercase |transform |"
-    r"edit |change |move |clear |mark .* done|"
+    r"edit |change |move |clear |mark .* done|log .+ (yesterday|last|ago|on |monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
     r"write me|give me|summarize|summarise|wrap.?up|stats|"
     r"add .* to my )",
     _re.IGNORECASE,
@@ -474,8 +474,8 @@ Available actions:
 5. Rename list: {{"action": "rename_list", "old_name": "<current>", "new_name": "<new>"}}
 6. Create list: {{"action": "create_list", "name": "<name>", "description": "<desc>"}}
 7. Transform list: {{"action": "transform_list", "list": "<name>", "transform": "capitalize|uppercase|lowercase|title_case"}}
-8. Track value: {{"action": "tracking", "type": "<mood|energy|sleep|etc>", "value": <number or null>, "notes": "<text>"}}
-9. Log habit: {{"action": "log_habit", "name": "<habit name>"}}
+8. Track value: {{"action": "tracking", "type": "<mood|energy|sleep|etc>", "value": <number or null>, "notes": "<text>", "date": "<YYYY-MM-DD or null for today>"}}
+9. Log habit: {{"action": "log_habit", "name": "<habit name>", "date": "<YYYY-MM-DD or null for today>"}}
 10. Create habit: {{"action": "create_habit", "name": "<name>"}}
 11. Delete habit: {{"action": "delete_habit", "name": "<name>"}}
 
@@ -592,14 +592,19 @@ def _execute_actions(actions):
                 type_ = action.get("type", "custom")
                 value = action.get("value")
                 notes = action.get("notes", "")
-                db.add_tracking(type_, value, notes)
-                results.append(f"tracked {type_}")
+                date = action.get("date")
+                if date:
+                    db.add_tracking(type_, value, notes, date=date)
+                else:
+                    db.add_tracking(type_, value, notes)
+                results.append(f"tracked {type_}" + (f" ({date})" if date else ""))
 
             elif a_type == "log_habit":
                 name = action.get("name", "").lower()
+                date = action.get("date")
                 if name:
-                    db.log_habit(name)
-                    results.append(f"logged {name}")
+                    db.log_habit(name, date=date)
+                    results.append(f"logged {name}" + (f" ({date})" if date else ""))
 
             elif a_type == "create_habit":
                 name = action.get("name", "").lower()

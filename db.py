@@ -430,12 +430,19 @@ def mark_done_by_id(item_id):
 
 # --- Tracking operations ---
 
-def add_tracking(type_, value=None, notes=None):
+def add_tracking(type_, value=None, notes=None, date=None):
+    """Add a tracking entry. If date is a YYYY-MM-DD string, backdate it."""
     conn = get_db()
-    conn.execute(
-        "INSERT INTO tracking (type, value, notes) VALUES (?, ?, ?)",
-        (type_.lower(), value, notes)
-    )
+    if date:
+        conn.execute(
+            "INSERT INTO tracking (type, value, notes, created_at) VALUES (?, ?, ?, ?)",
+            (type_.lower(), value, notes, f"{date} 12:00:00")
+        )
+    else:
+        conn.execute(
+            "INSERT INTO tracking (type, value, notes) VALUES (?, ?, ?)",
+            (type_.lower(), value, notes)
+        )
     conn.commit()
     conn.close()
 
@@ -508,12 +515,19 @@ def get_habits():
     return habits
 
 
-def log_habit(name, done=True):
+def log_habit(name, done=True, date=None):
+    """Log a habit. If date is a YYYY-MM-DD string, backdate it."""
     conn = get_db()
-    conn.execute(
-        "INSERT INTO habit_logs (habit_name, done) VALUES (?, ?)",
-        (name.lower(), 1 if done else 0)
-    )
+    if date:
+        conn.execute(
+            "INSERT INTO habit_logs (habit_name, done, created_at) VALUES (?, ?, ?)",
+            (name.lower(), 1 if done else 0, f"{date} 12:00:00")
+        )
+    else:
+        conn.execute(
+            "INSERT INTO habit_logs (habit_name, done) VALUES (?, ?)",
+            (name.lower(), 1 if done else 0)
+        )
     conn.commit()
     conn.close()
 
